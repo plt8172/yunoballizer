@@ -1,0 +1,7 @@
+# Hashtags to monitor (one per line, no #)
+# Instagram hashtag search requires login, so this file is only used by
+# 'yunoballizer discover'. Authors of discovered posts are auto-added to
+# accounts.txt.
+# Example:
+# travelphotography
+# foodphotography

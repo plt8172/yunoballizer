@@ -1,0 +1,4 @@
+# YouTube channels to monitor for Shorts (handle or channel URL)
+# Example:
+# @MrBeast
+# https://www.youtube.com/@veritasium

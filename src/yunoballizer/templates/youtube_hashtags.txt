@@ -1,0 +1,4 @@
+# YouTube hashtags to monitor (no #, one per line)
+# Example:
+# shorts
+# cooking

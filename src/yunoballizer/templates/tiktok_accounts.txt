@@ -1,0 +1,5 @@
+# TikTok accounts to monitor (no @, one per line)
+# Hashtag/trending discovery isn't reliably supported without login,
+# so only account-based monitoring is supported.
+# Example:
+# khaby.lame

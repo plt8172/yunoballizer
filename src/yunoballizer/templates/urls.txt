@@ -1,0 +1,5 @@
+# Paste TikTok / YouTube Shorts / etc. URLs to download, one per line.
+# Processed URLs are recorded in an archive automatically to avoid re-downloads.
+# Example:
+# https://www.tiktok.com/@user/video/1234567890
+# https://www.youtube.com/shorts/AbCdEfGhIjK

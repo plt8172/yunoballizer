@@ -5,11 +5,11 @@ import argparse
 import logging
 import sys
 
-from . import config, discover, instagram, mentions, tiktok, uninstall
-from . import urls as urls_mod
-from . import youtube
+from . import config, discover, mentions, prune
 from . import profile as profile_mod
 from . import curate as curate_mod
+from .downloaders import instagram, tiktok, youtube
+from .downloaders import urls as urls_mod
 
 logger = logging.getLogger("yunoballizer")
 
@@ -28,11 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("curate", help="Curate new posts against the taste profile")
     sub.add_parser("all", help="Run download then curate (cron entry point)")
 
-    uninstall_parser = sub.add_parser(
-        "uninstall",
+    prune_parser = sub.add_parser(
+        "prune",
         help="Remove this app's config/data/log directories (does not remove the installed package)",
     )
-    uninstall_parser.add_argument(
+    prune_parser.add_argument(
         "-y", "--yes", action="store_true", help="Skip the confirmation prompt"
     )
     return parser
@@ -56,8 +56,8 @@ def main(argv: list[str] | None = None) -> None:
         format="%(asctime)s [%(name)s] %(message)s",
     )
 
-    if args.command == "uninstall":
-        uninstall.run(assume_yes=args.yes)
+    if args.command == "prune":
+        prune.run(assume_yes=args.yes)
         return
 
     config.ensure_config()

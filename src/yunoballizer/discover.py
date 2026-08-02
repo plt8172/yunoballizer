@@ -2,7 +2,7 @@
 
 Saved posts and hashtag search require login under Instagram's current policy.
 So only this module uses login, and it auto-adds the authors of discovered
-posts to accounts.txt so that anonymous harvesting (instagram.py) takes over
+posts to accounts.txt so that anonymous harvesting (downloaders/instagram.py) takes over
 from there.
 
 Recommended to run manually every 1-2 weeks rather than putting it in cron.
@@ -45,7 +45,7 @@ def run(sleep_seconds: int = 20) -> None:
         check=False,
     )
 
-    hashtags = config.read_lines("hashtags.txt")
+    hashtags = config.read_lines(config.CONFIG_DIR / "instagram" / "hashtags.txt")
     for tag in hashtags:
         logger.info("[hashtag] checking #%s...", tag)
         subprocess.run(
@@ -61,6 +61,7 @@ def run(sleep_seconds: int = 20) -> None:
         time.sleep(sleep_seconds)
 
     # Auto-add the post authors' folder names to accounts.txt
+    accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
     new_accounts = set()
     if hashtags_dir.exists():
         for tag_dir in hashtags_dir.iterdir():
@@ -72,6 +73,6 @@ def run(sleep_seconds: int = 20) -> None:
 
     added = 0
     for name in sorted(new_accounts):
-        if config.append_line("accounts.txt", name):
+        if config.append_line(accounts_file, name):
             added += 1
-    logger.info("New accounts discovered and added to accounts.txt: %d", added)
+    logger.info("New accounts discovered and added to %s: %d", accounts_file, added)

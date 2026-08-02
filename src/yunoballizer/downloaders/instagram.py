@@ -9,15 +9,16 @@ import logging
 import subprocess
 import time
 
-from . import config
+from .. import config
 
 logger = logging.getLogger("yunoballizer.instagram")
 
 
 def harvest(sleep_seconds: int = 20) -> None:
-    accounts = config.read_lines("accounts.txt")
+    accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
+    accounts = config.read_lines(accounts_file)
     if not accounts:
-        logger.info("accounts.txt is empty, skipping")
+        logger.info("%s is empty, skipping", accounts_file)
         return
 
     out_dir = config.DATA_DIR / "instagram" / "accounts"

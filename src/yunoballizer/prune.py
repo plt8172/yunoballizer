@@ -14,7 +14,11 @@ from . import config
 
 logger = logging.getLogger("yunoballizer.uninstall")
 
-REMOVABLE_DIRS = [config.CONFIG_DIR, config.APP_DATA_DIR]
+REMOVABLE_DIRS = [
+    config.CONFIG_DIR,
+    config.DATA_DIR.parent,
+    config.LOG_DIR.parent
+]
 
 
 def run(assume_yes: bool = False) -> None:
@@ -27,11 +31,6 @@ def run(assume_yes: bool = False) -> None:
     print("This will permanently delete the following directories:")
     for d in existing:
         print(f"  - {d}")
-    print(
-        "\nNote: this includes all collected content under "
-        f"{config.DATA_DIR}. This does not uninstall the Python package "
-        "itself (run `pip uninstall yunoballizer` for that)."
-    )
 
     if not assume_yes:
         answer = input("\nContinue? [y/N] ").strip().lower()

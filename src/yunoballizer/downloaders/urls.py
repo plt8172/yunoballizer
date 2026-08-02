@@ -3,16 +3,17 @@ from __future__ import annotations
 
 import logging
 
-from . import config
+from .. import config
 from .ytdlp_helper import download
 
 logger = logging.getLogger("yunoballizer.urls")
 
 
 def harvest() -> None:
-    urls = config.read_lines("urls.txt")
+    urls_file = config.CONFIG_DIR / "urls.txt"
+    urls = config.read_lines(urls_file)
     if not urls:
-        logger.info("urls.txt is empty, skipping")
+        logger.info("%s is empty, skipping", urls_file)
         return
 
     out_dir = config.DATA_DIR / "other"

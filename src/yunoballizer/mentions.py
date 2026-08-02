@@ -21,7 +21,8 @@ def scan_and_append() -> int:
     if not scan_dir.exists():
         return 0
 
-    existing = set(config.read_lines("accounts.txt"))
+    accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
+    existing = set(config.read_lines(accounts_file))
     counts: Counter[str] = Counter()
 
     for txt_file in scan_dir.rglob("*.txt"):
@@ -36,7 +37,7 @@ def scan_and_append() -> int:
     for name in sorted(counts):
         if name in existing:
             continue
-        if config.append_line("accounts.txt", name):
+        if config.append_line(accounts_file, name):
             added += 1
             logger.debug("New account found: %s (mentioned %d times in captions)", name, counts[name])
 

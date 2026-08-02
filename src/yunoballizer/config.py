@@ -11,27 +11,28 @@ from importlib import resources
 from pathlib import Path
 
 CONFIG_DIR = Path.home() / ".config" / "yunoballizer"
-APP_DATA_DIR = Path.home() / ".local" / "share" / "yunoballizer"
-DATA_DIR = APP_DATA_DIR / "sources"
-LOG_DIR = APP_DATA_DIR / "logs"
+DATA_DIR = Path.home() / ".local" / "share" / "yunoballizer" / "sources"
+LOG_DIR = Path.home() / ".local" / "state" / "yunoballizer" / "logs"
 
 TEMPLATE_FILES = [
-    "accounts.txt",
-    "hashtags.txt",
-    "tiktok_accounts.txt",
-    "urls.txt",
-    "youtube_channels.txt",
-    "youtube_hashtags.txt",
+    "instagram/accounts.txt",
+    "instagram/hashtags.txt",
+    "tiktok/accounts.txt",
+    "youtube/accounts.txt",
+    "youtube/hashtags.txt",
+    "urls.txt"
 ]
 
 
 def ensure_config() -> None:
     """Create config/log directories and populate missing config files with default templates."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
     for name in TEMPLATE_FILES:
         dest = CONFIG_DIR / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
         if dest.exists():
             continue
         try:
@@ -45,9 +46,8 @@ def ensure_config() -> None:
         dest.write_text(content, encoding="utf-8")
 
 
-def read_lines(name: str) -> list[str]:
+def read_lines(path: Path) -> list[str]:
     """Return non-comment, non-empty lines from a config file."""
-    path = CONFIG_DIR / name
     if not path.exists():
         return []
     lines = []
@@ -58,12 +58,12 @@ def read_lines(name: str) -> list[str]:
     return lines
 
 
-def append_line(name: str, value: str) -> bool:
+def append_line(path: Path, value: str) -> bool:
     """Append a value to a config file if not already present. Returns True if actually added."""
-    path = CONFIG_DIR / name
-    existing = set(read_lines(name))
+    existing = set(read_lines(path))
     if value in existing:
         return False
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(value + "\n")
     return True

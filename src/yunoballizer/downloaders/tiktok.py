@@ -4,16 +4,17 @@ from __future__ import annotations
 import logging
 import time
 
-from . import config
+from .. import config
 from .ytdlp_helper import download
 
 logger = logging.getLogger("yunoballizer.tiktok")
 
 
 def harvest(sleep_seconds: int = 15) -> None:
-    accounts = config.read_lines("tiktok_accounts.txt")
+    accounts_file = config.CONFIG_DIR / "tiktok" / "accounts.txt"
+    accounts = config.read_lines(accounts_file)
     if not accounts:
-        logger.info("tiktok_accounts.txt is empty, skipping")
+        logger.info("%s is empty, skipping", accounts_file)
         return
 
     out_dir = config.DATA_DIR / "tiktok"

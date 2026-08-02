@@ -1,42 +1,45 @@
 """Anonymous (no-login) Instagram account harvesting.
 
-instaloader's internal API has shifted across versions, so instead of calling
-library functions directly, we shell out to its well-tested CLI interface.
+Uses the instaloader library directly instead of shelling out to its CLI:
+Instaloader.download_profiles() honors max_count for plain profile targets,
+but the instaloader CLI never forwards --count to that codepath (it's only
+wired up for #hashtag/:saved/:feed targets there), so the CLI has no way to
+cap posts per account.
 """
 from __future__ import annotations
 
 import logging
-import subprocess
 import time
+
+import instaloader
 
 from .. import config
 
 logger = logging.getLogger("yunoballizer.instagram")
 
 
-def harvest(sleep_seconds: int = 20) -> None:
-    accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
-    accounts = config.read_lines(accounts_file)
-    if not accounts:
-        logger.info("%s is empty, skipping", accounts_file)
-        return
+def harvest(sleep_seconds: int = 20, limit: int = 20, accounts: list[str] | None = None) -> None:
+    if accounts is None:
+        accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
+        accounts = config.read_lines(accounts_file)
+        if not accounts:
+            logger.info("%s is empty, skipping", accounts_file)
+            return
 
     out_dir = config.DATA_DIR / "instagram" / "accounts"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    loader = instaloader.Instaloader(
+        dirname_pattern=str(out_dir / "{target}"),
+        quiet=True,
+        download_comments=False,
+    )
+
     for account in accounts:
         logger.info("[account] checking %s...", account)
         try:
-            subprocess.run(
-                [
-                    "instaloader",
-                    "--fast-update",
-                    "--dirname-pattern", str(out_dir / "{target}"),
-                    account,
-                ],
-                check=False,
-            )
-        except FileNotFoundError:
-            logger.error("instaloader is not installed: pip install instaloader")
-            return
+            profile = instaloader.Profile.from_username(loader.context, account)
+            loader.download_profiles({profile}, fast_update=True, max_count=limit)
+        except instaloader.InstaloaderException as e:
+            logger.error("Failed to harvest %s: %s", account, e)
         time.sleep(sleep_seconds)

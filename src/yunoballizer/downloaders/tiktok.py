@@ -10,12 +10,13 @@ from .ytdlp_helper import download
 logger = logging.getLogger("yunoballizer.tiktok")
 
 
-def harvest(sleep_seconds: int = 15) -> None:
-    accounts_file = config.CONFIG_DIR / "tiktok" / "accounts.txt"
-    accounts = config.read_lines(accounts_file)
-    if not accounts:
-        logger.info("%s is empty, skipping", accounts_file)
-        return
+def harvest(sleep_seconds: int = 15, limit: int = 20, accounts: list[str] | None = None) -> None:
+    if accounts is None:
+        accounts_file = config.CONFIG_DIR / "tiktok" / "accounts.txt"
+        accounts = config.read_lines(accounts_file)
+        if not accounts:
+            logger.info("%s is empty, skipping", accounts_file)
+            return
 
     out_dir = config.DATA_DIR / "tiktok"
     archive = out_dir / "archive.txt"
@@ -27,6 +28,6 @@ def harvest(sleep_seconds: int = 15) -> None:
             url,
             str(out_dir / "accounts" / account / "%(id)s.%(ext)s"),
             archive,
-            {"playlistend": 20},
+            {"playlistend": limit},
         )
         time.sleep(sleep_seconds)

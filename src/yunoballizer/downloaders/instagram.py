@@ -38,6 +38,7 @@ def harvest(
         dirname_pattern=str(out_dir / "{target}"),
         quiet=True,
         download_comments=False,
+        download_video_thumbnails=False,
     )
 
     for account in accounts:

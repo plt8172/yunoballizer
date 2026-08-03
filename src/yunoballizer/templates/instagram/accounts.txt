@@ -1,6 +1,6 @@
 # Instagram accounts to monitor (no @, one per line)
 # This is the anonymous (no-login) source of new posts.
-# Also auto-populated by 'yunoballizer discover' and caption-mention scanning.
+# Also auto-populated by 'yunoballizer expand'.
 # Example:
 # nasa
 # natgeo

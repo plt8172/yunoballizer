@@ -30,7 +30,7 @@ def build() -> dict:
     if not captions:
         raise SystemExit(
             f"No saved post captions found: {saved_dir}\n"
-            "Run `yunoballizer discover` first to fetch your saved posts."
+            "Run `yunoballizer fetch` first to fetch your saved posts."
         )
 
     hashtag_counter: Counter[str] = Counter()

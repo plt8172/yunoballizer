@@ -3,20 +3,28 @@
 A personal CLI tool for automatically collecting content from Instagram,
 YouTube Shorts, and TikTok.
 
-## Core design: separating "discovery" from "harvest"
+## Core design: separating "fetch" / "expand" from "harvest"
 
-As of 2026, Instagram requires login for hashtag/location search (profile
-posts are still accessible anonymously). So login is used **only rarely, to
-discover new accounts**, while **anonymous, no-login account crawling handles
-the actual day-to-day volume**.
+As of 2026, Instagram requires login for hashtag search and saved posts
+(profile timelines are still accessible anonymously). So login is used
+**only rarely, to fetch hashtag/saved data and grow the account list**,
+while **anonymous, no-login account crawling handles the actual day-to-day
+volume**.
 
 ```
-[occasional, login]  yunoballizer discover  -> hashtag search + saved posts -> discovers new accounts -> auto-added to accounts.txt
-                                                                                    |
-[daily, anonymous]   yunoballizer download  -> crawls accounts.txt for new posts
-                                                + discovers more accounts from @mentions in captions (no extra requests)
-                                                + also harvests YouTube Shorts / TikTok accounts / URL list
+[manual, login]      yuno fetch     -> saved posts + hashtag search results
+                                            |
+[manual, no login]   yuno expand    -> grows accounts.txt from fetch's hashtag
+                                        authors + caption mentions in already-
+                                        downloaded posts (no extra requests)
+                                            |
+[frequent, no login] yuno download  -> crawls accounts.txt + urls.txt across
+                                        Instagram/YouTube/TikTok
 ```
+
+`yuno profile` (taste profile) and `yuno curate` (filtering) sit on top of
+this: `profile` reads `fetch`'s saved-post captions, and `curate` reads
+`download`'s output.
 
 ## Install
 
@@ -45,11 +53,10 @@ Fill in the files under `~/.config/yunoballizer/`:
 
 | File | Purpose | Login |
 |---|---|---|
-| `accounts.txt` | Instagram accounts' new posts/reels | Not required |
-| `hashtags.txt` | Instagram hashtags -> account auto-discovery | **Required** |
-| `youtube_channels.txt` | YouTube channels' Shorts tab | Not required |
-| `youtube_hashtags.txt` | YouTube hashtags | Not required |
-| `tiktok_accounts.txt` | TikTok accounts (hashtags not supported) | Not required |
+| `instagram/accounts.txt` | Instagram accounts to crawl | Not required |
+| `instagram/hashtags.txt` | Hashtags for `yuno fetch` (auto-expands accounts.txt via `yuno expand`) | **Required** (fetch only) |
+| `youtube/accounts.txt` | YouTube channels' Shorts tab | Not required |
+| `tiktok/accounts.txt` | TikTok accounts (hashtags not supported) | Not required |
 | `urls.txt` | Individual TikTok/YouTube URLs to download | Not required |
 
 ## Usage
@@ -58,16 +65,17 @@ Fill in the files under `~/.config/yunoballizer/`:
 yuno download            # No login required. Crawls accounts.txt + urls.txt (Instagram/YouTube/TikTok)
 yuno download @nasa      # Harvest a single account across all three platforms instead of the configured lists
 yuno download -l 5       # Cap harvest at 5 posts per account (default: 20)
-yuno download -s 5 -l 10 # Skip the newest 5 posts, then harvest the next 10 per account
-yuno fetch                # Login required. Adds saved-post authors to Instagram accounts.txt; downloads nothing
-yuno expand               # No login required. Adds @mentions from downloaded Instagram captions
-yuno profile              # Build/refresh a content profile from downloaded Instagram captions
-yuno curate               # Curate downloaded posts against the content profile
+yuno fetch                # Login required. Fetches saved posts + hashtag search results (manual, every 1-2 weeks)
+yuno expand               # No login required. Grows accounts.txt from fetch's hashtag authors + caption mentions
+yuno profile              # Build/refresh taste profile from fetch's saved-post captions
+yuno curate               # Curate download's output against the taste profile
 yuno all                  # download + curate (cron entry point)
 ```
 
-For `discover`, log in once with `instaloader --login=your_username` to
-create a session, then `export IG_USERNAME=your_username` before running it.
+For `fetch`, set `export IG_USERNAME=your_username` (or you'll be prompted
+for it). The first run will also prompt for your password interactively
+(and a 2FA code if enabled), then cache a session so future runs don't ask
+again.
 
 ## cron setup (macOS/Linux)
 
@@ -76,8 +84,10 @@ crontab -e
 ```
 
 ```
-0 */6 * * * IG_USERNAME=your_username /path/to/venv/bin/yuno all >> ~/.local/share/yunoballizer/logs/cron.log 2>&1
+0 */6 * * * /path/to/venv/bin/yuno all >> ~/.local/share/yunoballizer/logs/cron.log 2>&1
 ```
+
+`fetch`/`expand` are meant to be run manually every 1-2 weeks, not from cron.
 
 ## Data locations
 
@@ -88,7 +98,7 @@ crontab -e
 ## Uninstalling
 
 ```bash
-yuno uninstall
+yuno prune
 ```
 
 This removes the config, data, and log directories this app created
@@ -102,7 +112,8 @@ pip uninstall yunoballizer
 
 ## Notes
 
-- TikTok hashtag/trending discovery is not supported (accounts only).
+- TikTok hashtag/trending discovery isn't supported at all right now — the
+  yt-dlp extractor for it is broken upstream, independent of login.
 - Even anonymous harvesting can trigger a temporary IP-level block if run
   too aggressively.
 - Instagram's Terms of Service explicitly prohibit automated collection.

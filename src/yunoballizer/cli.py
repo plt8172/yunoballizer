@@ -7,7 +7,7 @@ import logging
 import sys
 import zlib
 
-from . import config, discover, prune
+from . import config, expand, fetch, prune
 from . import profile as profile_mod
 from . import curate as curate_mod
 from .downloaders import instagram, tiktok, youtube
@@ -47,7 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
              "Must start with '@' for an account, e.g. '@nasa' (hashtag support may come later)",
     )
 
-    sub.add_parser("discover", help="Requires login. Harvests hashtags + saved posts, auto-discovers accounts (manual/low-frequency)")
+    sub.add_parser("fetch", help="Requires login. Fetches saved posts + hashtag search results (manual/low-frequency)")
+    sub.add_parser("expand", help="No login required. Expands accounts.txt from hashtag-fetched authors and caption mentions")
     sub.add_parser("profile", help="Build/refresh the taste profile from saved posts")
     sub.add_parser("curate", help="Curate new posts against the taste profile")
     sub.add_parser("all", help="Run download then curate (cron entry point)")
@@ -74,6 +75,15 @@ def _run_download(
         urls_mod.harvest()
 
 
+def _run_expand() -> None:
+    added_hashtag = expand.scan_hashtag_authors()
+    added_caption = expand.scan_caption_mentions()
+    logger.info(
+        "New accounts added: %d via hashtag authors, %d via caption mentions",
+        added_hashtag, added_caption,
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     argv = list(argv if argv is not None else sys.argv[1:])
     if argv == ["ball"]:
@@ -97,8 +107,10 @@ def main(argv: list[str] | None = None) -> None:
 
     config.ensure_config()
 
-    if args.command == "discover":
-        discover.run()
+    if args.command == "fetch":
+        fetch.run()
+    elif args.command == "expand":
+        _run_expand()
     elif args.command == "download":
         accounts = None
         if args.target:

@@ -1,4 +1,4 @@
-"""Scans @mentions in already-downloaded captions to auto-expand accounts.txt.
+"""Auto-expands accounts.txt from signals in already-fetched content.
 
 No extra network requests are made, so growing the account pool this way
 doesn't add any additional risk.
@@ -11,18 +11,17 @@ from collections import Counter
 
 from . import config
 
-logger = logging.getLogger("yunoballizer.mentions")
+logger = logging.getLogger("yunoballizer.expand")
 
 MENTION_RE = re.compile(r"@([A-Za-z0-9_.]{2,30})")
 
 
-def scan_and_append() -> int:
+def scan_caption_mentions() -> int:
     scan_dir = config.DATA_DIR / "instagram" / "accounts"
     if not scan_dir.exists():
         return 0
 
     accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
-    existing = set(config.read_lines(accounts_file))
     counts: Counter[str] = Counter()
 
     for txt_file in scan_dir.rglob("*.txt"):
@@ -35,10 +34,31 @@ def scan_and_append() -> int:
 
     added = 0
     for name in sorted(counts):
-        if name in existing:
-            continue
         if config.append_line(accounts_file, name):
             added += 1
             logger.debug("New account found: %s (mentioned %d times in captions)", name, counts[name])
+
+    return added
+
+
+def scan_hashtag_authors() -> int:
+    hashtags_dir = config.DATA_DIR / "instagram" / "hashtags"
+    if not hashtags_dir.exists():
+        return 0
+
+    accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
+    new_accounts = set()
+    for tag_dir in hashtags_dir.iterdir():
+        if not tag_dir.is_dir():
+            continue
+        for owner_dir in tag_dir.iterdir():
+            if owner_dir.is_dir():
+                new_accounts.add(owner_dir.name)
+
+    added = 0
+    for name in sorted(new_accounts):
+        if config.append_line(accounts_file, name):
+            added += 1
+            logger.debug("New account found: %s (posted under a monitored hashtag)", name)
 
     return added

@@ -5,7 +5,9 @@ doesn't add any additional risk.
 """
 from __future__ import annotations
 
+import json
 import logging
+import lzma
 import re
 from collections import Counter
 
@@ -60,5 +62,29 @@ def scan_hashtag_authors() -> int:
         if config.append_line(accounts_file, name):
             added += 1
             logger.debug("New account found: %s (posted under a monitored hashtag)", name)
+
+    return added
+
+
+def scan_saved_authors() -> int:
+    saved_dir = config.DATA_DIR / "instagram" / "saved"
+    if not saved_dir.exists():
+        return 0
+
+    accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
+    authors = set()
+    for meta_file in saved_dir.rglob("*.json.xz"):
+        try:
+            with lzma.open(meta_file) as f:
+                data = json.load(f)
+            authors.add(data["node"]["owner"]["username"])
+        except Exception:
+            continue
+
+    added = 0
+    for name in sorted(authors):
+        if config.append_line(accounts_file, name):
+            added += 1
+            logger.debug("New account found: %s (authored a saved post)", name)
 
     return added

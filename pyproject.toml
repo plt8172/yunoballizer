@@ -7,6 +7,7 @@ requires-python = ">=3.9"
 dependencies = [
     "instaloader>=4.10",
     "yt-dlp>=2024.1.1",
+    "browser_cookie3>=0.19",
 ]
 
 [project.optional-dependencies]

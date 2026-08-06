@@ -64,6 +64,12 @@ def append_line(path: Path, value: str) -> bool:
     if value in existing:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
+    needs_leading_newline = False
+    if path.exists():
+        content = path.read_bytes()
+        needs_leading_newline = bool(content) and not content.endswith(b"\n")
     with path.open("a", encoding="utf-8") as f:
+        if needs_leading_newline:
+            f.write("\n")
         f.write(value + "\n")
     return True

@@ -47,8 +47,13 @@ def build_parser() -> argparse.ArgumentParser:
              "Must start with '@' for an account, e.g. '@nasa' (hashtag support may come later)",
     )
 
-    sub.add_parser("fetch", help="Requires login. Fetches saved posts + hashtag search results (manual/low-frequency)")
-    sub.add_parser("expand", help="No login required. Expands accounts.txt from hashtag-fetched authors and caption mentions")
+    fetch_parser = sub.add_parser("fetch", help="Requires login. Fetches saved posts + hashtag search results (manual/low-frequency)")
+    fetch_parser.add_argument(
+        "-b", "--browser", default=fetch.DEFAULT_BROWSER,
+        help=f"Browser to import the Instagram login session's cookies from (default: {fetch.DEFAULT_BROWSER}). "
+             "Avoids Instagram's automated-login checkpoint by reusing an already-logged-in session.",
+    )
+    sub.add_parser("expand", help="No login required. Expands accounts.txt from hashtag/saved-post authors and caption mentions")
     sub.add_parser("profile", help="Build/refresh the taste profile from saved posts")
     sub.add_parser("curate", help="Curate new posts against the taste profile")
     sub.add_parser("all", help="Run download then curate (cron entry point)")
@@ -77,10 +82,11 @@ def _run_download(
 
 def _run_expand() -> None:
     added_hashtag = expand.scan_hashtag_authors()
+    added_saved = expand.scan_saved_authors()
     added_caption = expand.scan_caption_mentions()
     logger.info(
-        "New accounts added: %d via hashtag authors, %d via caption mentions",
-        added_hashtag, added_caption,
+        "New accounts added: %d via hashtag authors, %d via saved-post authors, %d via caption mentions",
+        added_hashtag, added_saved, added_caption,
     )
 
 
@@ -108,7 +114,7 @@ def main(argv: list[str] | None = None) -> None:
     config.ensure_config()
 
     if args.command == "fetch":
-        fetch.run()
+        fetch.run(browser=args.browser)
     elif args.command == "expand":
         _run_expand()
     elif args.command == "download":

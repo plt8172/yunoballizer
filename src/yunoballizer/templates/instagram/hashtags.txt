@@ -1,7 +1,0 @@
-# Hashtags to monitor (one per line, no #)
-# Instagram hashtag search requires login, so this file is only used by
-# 'yunoballizer fetch'. Run 'yunoballizer expand' afterward to auto-add
-# the authors of fetched posts to accounts.txt.
-# Example:
-# travelphotography
-# foodphotography

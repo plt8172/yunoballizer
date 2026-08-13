@@ -1,6 +1,6 @@
 """Manages config files and data storage locations.
 
-- Config files (account/hashtag lists, taste profile, etc.): ~/.config/yunoballizer/
+- Config files (account lists, content profile, etc.): ~/.config/yunoballizer/
 - App data root: ~/.local/share/yunoballizer/
   - Collected content: ~/.local/share/yunoballizer/sources/
   - Logs: ~/.local/share/yunoballizer/logs/
@@ -16,7 +16,6 @@ LOG_DIR = Path.home() / ".local" / "state" / "yunoballizer" / "logs"
 
 TEMPLATE_FILES = [
     "instagram/accounts.txt",
-    "instagram/hashtags.txt",
     "tiktok/accounts.txt",
     "youtube/accounts.txt",
     "youtube/hashtags.txt",

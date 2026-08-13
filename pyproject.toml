@@ -5,7 +5,7 @@ description = "Personal automation tool for collecting content from Instagram, Y
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "instaloader>=4.10",
+    "instaloader>=4.11",
     "yt-dlp>=2024.1.1",
     "browser_cookie3>=0.19",
 ]

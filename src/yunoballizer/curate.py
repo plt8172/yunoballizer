@@ -1,4 +1,4 @@
-"""Curates newly harvested posts against the taste profile using rules + AI."""
+"""Curates newly harvested posts against the content profile using rules + AI."""
 from __future__ import annotations
 
 import json
@@ -17,7 +17,6 @@ LOG_FILENAME = "curation_log.json"
 
 SOURCE_SUBDIRS = [
     ("instagram", "accounts"),
-    ("instagram", "hashtags"),
     ("other",),
     ("youtube", "channels"),
     ("youtube", "hashtags"),

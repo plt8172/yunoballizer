@@ -1,21 +1,14 @@
-"""Login-required fetching of saved posts and hashtag search results.
+"""Discover account names from the logged-in user's saved Instagram posts.
 
-Authenticates via --load-cookies (reusing an already-logged-in browser
-session) instead of instaloader's own --login flow. Instagram treats a
-fresh programmatic --login as a different, untrusted "device" from the
-browser, so completing the checkpoint verification in a browser doesn't
-actually clear it for --login — it's a long-standing, essentially
-unresolved loop (see instaloader issues #2590, #1740, #798, #1642, #1787).
-Reusing real browser cookies sidesteps the checkpoint entirely since no
-new login is attempted.
-
-Recommended to run manually every 1-2 weeks rather than putting it in cron.
+Fetch deliberately stores no post media or captions.  It reuses an existing
+browser session, reads the owners of saved posts, and adds those usernames to
+the anonymous download queue.
 """
 from __future__ import annotations
 
 import logging
-import subprocess
-import time
+from collections.abc import Iterable
+from typing import Any
 
 from . import config
 
@@ -24,37 +17,55 @@ logger = logging.getLogger("yunoballizer.fetch")
 DEFAULT_BROWSER = "chrome"
 
 
-def run(sleep_seconds: int = 20, browser: str = DEFAULT_BROWSER) -> None:
-    saved_dir = config.DATA_DIR / "instagram" / "saved"
-    hashtags_dir = config.DATA_DIR / "instagram" / "hashtags"
-    saved_dir.mkdir(parents=True, exist_ok=True)
-    hashtags_dir.mkdir(parents=True, exist_ok=True)
+def _authenticated_loader(browser: str) -> Any:
+    try:
+        import browser_cookie3
+        import instaloader
+    except ImportError as exc:
+        raise SystemExit(
+            "Instagram fetch dependencies are missing. Reinstall yunoballizer."
+        ) from exc
 
-    logger.info("[saved posts] checking...")
-    subprocess.run(
-        [
-            "instaloader",
-            "--fast-update",
-            "--no-video-thumbnails",
-            "--load-cookies", browser,
-            "--dirname-pattern", str(saved_dir / "{target}"),
-            ":saved",
-        ],
-        check=False,
-    )
+    cookie_loader = getattr(browser_cookie3, browser, None)
+    if not callable(cookie_loader):
+        raise SystemExit(f"Unsupported browser for cookie import: {browser}")
 
-    hashtags = config.read_lines(config.CONFIG_DIR / "instagram" / "hashtags.txt")
-    for tag in hashtags:
-        logger.info("[hashtag] checking #%s...", tag)
-        subprocess.run(
-            [
-                "instaloader",
-                "--fast-update",
-                "--no-video-thumbnails",
-                "--load-cookies", browser,
-                "--dirname-pattern", str(hashtags_dir / tag / "{profile}"),
-                f"#{tag}",
-            ],
-            check=False,
+    try:
+        cookies = cookie_loader(domain_name=".instagram.com")
+        loader = instaloader.Instaloader(quiet=True)
+        loader.context.update_cookies(cookies)
+        username = loader.test_login()
+    except Exception as exc:
+        raise SystemExit(f"Could not import the Instagram session from {browser}: {exc}") from exc
+
+    if not username:
+        raise SystemExit(
+            f"No logged-in Instagram session found in {browser}. "
+            "Log in to instagram.com in that browser and try again."
         )
-        time.sleep(sleep_seconds)
+
+    loader.context.username = username
+    logger.info("Using Instagram session for @%s", username)
+    return loader
+
+
+def _saved_posts(loader: Any) -> Iterable[Any]:
+    import instaloader
+
+    return instaloader.Profile.own_profile(loader.context).get_saved_posts()
+
+
+def run(browser: str = DEFAULT_BROWSER) -> int:
+    """Add saved-post authors to accounts.txt without downloading post files."""
+    loader = _authenticated_loader(browser)
+    accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
+
+    authors = {
+        post.owner_username.strip().lower()
+        for post in _saved_posts(loader)
+        if getattr(post, "owner_username", "").strip()
+    }
+
+    added = sum(config.append_line(accounts_file, author) for author in sorted(authors))
+    logger.info("Saved-post authors found: %d, newly added: %d", len(authors), added)
+    return added

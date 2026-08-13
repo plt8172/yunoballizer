@@ -1,4 +1,4 @@
-"""Builds a taste profile (taste_profile.json) from saved post captions."""
+"""Builds a content profile from downloaded Instagram captions."""
 from __future__ import annotations
 
 import json
@@ -18,10 +18,10 @@ PROFILE_FILENAME = "taste_profile.json"
 
 
 def build() -> dict:
-    saved_dir = config.DATA_DIR / "instagram" / "saved"
+    captions_dir = config.DATA_DIR / "instagram" / "accounts"
     captions = []
-    if saved_dir.exists():
-        for txt_file in saved_dir.rglob("*.txt"):
+    if captions_dir.exists():
+        for txt_file in captions_dir.rglob("*.txt"):
             try:
                 captions.append(txt_file.read_text(encoding="utf-8", errors="ignore"))
             except Exception:
@@ -29,8 +29,8 @@ def build() -> dict:
 
     if not captions:
         raise SystemExit(
-            f"No saved post captions found: {saved_dir}\n"
-            "Run `yunoballizer fetch` first to fetch your saved posts."
+            f"No downloaded Instagram captions found: {captions_dir}\n"
+            "Run `yunoballizer download` first."
         )
 
     hashtag_counter: Counter[str] = Counter()

@@ -17,14 +17,14 @@ MENTION_RE = re.compile(r"@([A-Za-z0-9_.]{2,30})")
 
 
 def scan_caption_mentions() -> int:
-    scan_dir = config.DATA_DIR / "instagram" / "accounts"
+    scan_dir = config.SOURCES_DIR / "instagram"
     if not scan_dir.exists():
         return 0
 
     accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
     counts: Counter[str] = Counter()
 
-    for txt_file in scan_dir.rglob("*.txt"):
+    for txt_file in scan_dir.glob("*/*/caption.txt"):
         try:
             text = txt_file.read_text(encoding="utf-8", errors="ignore")
         except Exception:

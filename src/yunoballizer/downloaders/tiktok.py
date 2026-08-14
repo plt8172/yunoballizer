@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import time
 
-from .. import config
+from .. import config, storage
 from .ytdlp_helper import download
 
 logger = logging.getLogger("yunoballizer.tiktok")
@@ -23,16 +23,20 @@ def harvest(
             logger.info("%s is empty, skipping", accounts_file)
             return
 
-    out_dir = config.DATA_DIR / "tiktok"
-    archive = out_dir / "archive.txt"
+    out_dir = config.SOURCES_DIR / "tiktok"
+    archive = config.ARCHIVE_DIR / "tiktok.txt"
 
     for account in accounts:
         url = f"https://www.tiktok.com/@{account}"
         logger.info("[account] checking %s...", url)
         download(
             url,
-            str(out_dir / "accounts" / account / "%(id)s.%(ext)s"),
+            str(out_dir / account / "%(id)s" / "video.%(ext)s"),
             archive,
             {"playliststart": skip + 1, "playlistend": skip + limit},
+            metadata_template=str(out_dir / account / "%(id)s" / "metadata.%(ext)s"),
+            caption_template=str(out_dir / account / "%(id)s" / "caption.%(ext)s"),
         )
         time.sleep(sleep_seconds)
+
+    storage.organize_ytdlp_tree(out_dir)

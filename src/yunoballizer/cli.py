@@ -7,7 +7,7 @@ import logging
 import sys
 import zlib
 
-from . import config, expand, fetch, prune
+from . import config, expand, fetch, prune, storage
 from . import profile as profile_mod
 from . import curate as curate_mod
 from .downloaders import instagram, tiktok, youtube
@@ -78,6 +78,8 @@ def _run_download(
     tiktok.harvest(limit=limit, skip=skip, accounts=accounts)
     if accounts is None:
         urls_mod.harvest()
+    added = storage.refresh_review()
+    logger.info("New items added to review/: %d", added)
 
 
 def _run_expand() -> None:
@@ -125,7 +127,7 @@ def main(argv: list[str] | None = None) -> None:
         curate_mod.run()
     elif args.command == "all":
         _run_download()
-        if (config.CONFIG_DIR / profile_mod.PROFILE_FILENAME).exists():
+        if (config.DERIVED_DIR / profile_mod.PROFILE_FILENAME).exists():
             curate_mod.run()
 
 

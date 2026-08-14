@@ -18,10 +18,10 @@ PROFILE_FILENAME = "taste_profile.json"
 
 
 def build() -> dict:
-    captions_dir = config.DATA_DIR / "instagram" / "accounts"
+    captions_dir = config.SOURCES_DIR / "instagram"
     captions = []
     if captions_dir.exists():
-        for txt_file in captions_dir.rglob("*.txt"):
+        for txt_file in captions_dir.glob("*/*/caption.txt"):
             try:
                 captions.append(txt_file.read_text(encoding="utf-8", errors="ignore"))
             except Exception:
@@ -49,6 +49,7 @@ def build() -> dict:
         "top_keywords": [w for w, _ in word_counter.most_common(60)],
     }
 
-    profile_path = config.CONFIG_DIR / PROFILE_FILENAME
+    profile_path = config.DERIVED_DIR / PROFILE_FILENAME
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
     profile_path.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
     return profile

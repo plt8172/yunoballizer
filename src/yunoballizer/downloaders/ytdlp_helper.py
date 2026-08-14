@@ -16,19 +16,31 @@ def download(
     out_template: str,
     archive: Path,
     extra_opts: dict | None = None,
+    metadata_template: str | None = None,
+    caption_template: str | None = None,
 ) -> None:
     if isinstance(urls, str):
         urls = [urls]
 
+    output_templates: str | dict[str, str] = out_template
+    if metadata_template or caption_template:
+        output_templates = {"default": out_template}
+        if metadata_template:
+            output_templates["infojson"] = metadata_template
+        if caption_template:
+            output_templates["description"] = caption_template
+
     opts = {
         "download_archive": str(archive),
         "writeinfojson": True,
-        "outtmpl": out_template,
+        "outtmpl": output_templates,
         "ignoreerrors": True,
         "sleep_interval_requests": 2,
         "quiet": True,
         "no_warnings": True,
     }
+    if caption_template:
+        opts["writedescription"] = True
     if extra_opts:
         opts.update(extra_opts)
 

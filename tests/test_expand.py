@@ -14,17 +14,19 @@ class ExpandTests(unittest.TestCase):
             root = Path(tmpdir)
             config_dir = root / "config"
             data_dir = root / "data"
-            captions_dir = data_dir / "instagram" / "accounts"
-            (captions_dir / "one").mkdir(parents=True)
-            (captions_dir / "two" / "nested").mkdir(parents=True)
-            (captions_dir / "one" / "a.txt").write_text("hello @Alpha", encoding="utf-8")
-            (captions_dir / "two" / "nested" / "b.txt").write_text(
+            captions_dir = data_dir / "instagram"
+            (captions_dir / "one" / "post1").mkdir(parents=True)
+            (captions_dir / "two" / "post2").mkdir(parents=True)
+            (captions_dir / "one" / "post1" / "caption.txt").write_text(
+                "hello @Alpha", encoding="utf-8"
+            )
+            (captions_dir / "two" / "post2" / "caption.txt").write_text(
                 "@beta and @ALPHA", encoding="utf-8"
             )
 
             with (
                 patch.object(expand.config, "CONFIG_DIR", config_dir),
-                patch.object(expand.config, "DATA_DIR", data_dir),
+                patch.object(expand.config, "SOURCES_DIR", data_dir),
             ):
                 added = expand.scan_caption_mentions()
 

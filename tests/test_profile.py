@@ -14,21 +14,20 @@ class ProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             config_dir = root / "config"
-            captions_dir = root / "data" / "instagram" / "accounts" / "creator"
-            captions_dir.mkdir(parents=True)
-            captions_dir.joinpath("post.txt").write_text(
-                "Street photo #Seoul #Night", encoding="utf-8"
-            )
+            post_dir = root / "data" / "instagram" / "creator" / "post1"
+            post_dir.mkdir(parents=True)
+            (post_dir / "caption.txt").write_text("Street photo #Seoul #Night", encoding="utf-8")
             config_dir.mkdir()
 
             with (
                 patch.object(profile.config, "CONFIG_DIR", config_dir),
-                patch.object(profile.config, "DATA_DIR", root / "data"),
+                patch.object(profile.config, "SOURCES_DIR", root / "data"),
+                patch.object(profile.config, "DERIVED_DIR", root / "derived"),
             ):
                 result = profile.build()
 
             stored = json.loads(
-                (config_dir / profile.PROFILE_FILENAME).read_text(encoding="utf-8")
+                (root / "derived" / profile.PROFILE_FILENAME).read_text(encoding="utf-8")
             )
             self.assertEqual(result, stored)
             self.assertEqual(result["source_post_count"], 1)

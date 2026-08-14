@@ -16,8 +16,8 @@ logger = logging.getLogger("yunoballizer.uninstall")
 
 REMOVABLE_DIRS = [
     config.CONFIG_DIR,
-    config.DATA_DIR.parent,
-    config.LOG_DIR.parent
+    config.DATA_DIR,
+    config.STATE_DIR,
 ]
 
 

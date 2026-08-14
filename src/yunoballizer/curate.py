@@ -3,51 +3,41 @@ from __future__ import annotations
 
 import json
 import logging
+import lzma
 import os
 import re
-import shutil
 from pathlib import Path
+from shutil import copy2
 
 from . import config
 from .profile import PROFILE_FILENAME
+from .storage import MEDIA_EXTS, review_link_name
 
 logger = logging.getLogger("yunoballizer.curate")
-
-LOG_FILENAME = "curation_log.json"
-
-SOURCE_SUBDIRS = [
-    ("instagram", "accounts"),
-    ("other",),
-    ("youtube", "channels"),
-    ("youtube", "hashtags"),
-    ("tiktok", "accounts"),
-]
 
 LOW_THRESHOLD = 0.05
 HIGH_THRESHOLD = 0.25
 
 HASHTAG_RE = re.compile(r"#(\w+)")
 WORD_RE = re.compile(r"[A-Za-z가-힣]{2,}")
-MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".mp4", ".webm"}
 
 
 def _load_profile() -> dict:
-    path = config.CONFIG_DIR / PROFILE_FILENAME
+    path = config.DERIVED_DIR / PROFILE_FILENAME
     if not path.exists():
         raise SystemExit("taste_profile.json not found. Run `yunoballizer profile` first.")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _load_log() -> dict:
-    path = config.CONFIG_DIR / LOG_FILENAME
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
+    if config.CURATION_LOG_PATH.exists():
+        return json.loads(config.CURATION_LOG_PATH.read_text(encoding="utf-8"))
     return {}
 
 
 def _save_log(log: dict) -> None:
-    path = config.CONFIG_DIR / LOG_FILENAME
-    path.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
+    config.CURATION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    config.CURATION_LOG_PATH.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _rule_score(caption: str, profile: dict) -> float:
@@ -105,34 +95,34 @@ Is this user likely to enjoy this post? Answer with a single word, "yes" or "no"
 
 
 def _find_caption(media_path: Path) -> str:
-    txt_path = media_path.with_suffix(".txt")
-    if txt_path.exists():
-        return txt_path.read_text(encoding="utf-8", errors="ignore")
+    """A post's caption lives beside its media, in the same bundle directory."""
+    post_dir = media_path.parent
+    caption_path = post_dir / "caption.txt"
+    if caption_path.exists():
+        return caption_path.read_text(encoding="utf-8", errors="ignore")
 
-    json_path = Path(str(media_path.with_suffix(""))).with_suffix(".info.json")
-    if json_path.exists():
+    metadata_path = post_dir / "metadata.json.xz"
+    if metadata_path.exists():
         try:
-            data = json.loads(json_path.read_text(encoding="utf-8", errors="ignore"))
-            return data.get("description", "") or data.get("title", "")
+            with lzma.open(metadata_path) as f:
+                data = json.loads(f.read())
         except Exception:
             return ""
+        return data.get("description") or data.get("title") or ""
     return ""
 
 
 def run() -> None:
     profile = _load_profile()
     log = _load_log()
-    curated_dir = config.DATA_DIR / "curated"
+    curated_dir = config.CURATED_DIR
     curated_dir.mkdir(parents=True, exist_ok=True)
 
     checked = kept = 0
 
-    for parts in SOURCE_SUBDIRS:
-        source_dir = config.DATA_DIR.joinpath(*parts)
-        if not source_dir.exists():
-            continue
-        for media_path in source_dir.rglob("*"):
-            if media_path.suffix.lower() not in MEDIA_EXTS:
+    if config.SOURCES_DIR.exists():
+        for media_path in config.SOURCES_DIR.rglob("*"):
+            if not media_path.is_file() or media_path.suffix.lower() not in MEDIA_EXTS:
                 continue
             key = str(media_path)
             if key in log:
@@ -152,7 +142,8 @@ def run() -> None:
             log[key] = {"score": round(score, 3), "decision": decision}
 
             if decision == "keep":
-                shutil.copy2(media_path, curated_dir / media_path.name)
+                relative = media_path.relative_to(config.SOURCES_DIR)
+                copy2(media_path, curated_dir / review_link_name(relative))
                 kept += 1
 
     _save_log(log)

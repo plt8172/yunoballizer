@@ -18,7 +18,12 @@ from .. import config
 logger = logging.getLogger("yunoballizer.instagram")
 
 
-def harvest(sleep_seconds: int = 20, limit: int = 20, accounts: list[str] | None = None) -> None:
+def harvest(
+    sleep_seconds: int = 20,
+    limit: int = 20,
+    accounts: list[str] | None = None,
+    skip: int = 0,
+) -> None:
     if accounts is None:
         accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
         accounts = config.read_lines(accounts_file)
@@ -39,7 +44,21 @@ def harvest(sleep_seconds: int = 20, limit: int = 20, accounts: list[str] | None
         logger.info("[account] checking %s...", account)
         try:
             profile = instaloader.Profile.from_username(loader.context, account)
-            loader.download_profiles({profile}, fast_update=True, max_count=limit)
+            remaining_to_skip = skip
+
+            def include_post(_post: object) -> bool:
+                nonlocal remaining_to_skip
+                if remaining_to_skip:
+                    remaining_to_skip -= 1
+                    return False
+                return True
+
+            loader.download_profiles(
+                {profile},
+                fast_update=True,
+                max_count=skip + limit,
+                post_filter=include_post,
+            )
         except instaloader.InstaloaderException as e:
             logger.error("Failed to harvest %s: %s", account, e)
         time.sleep(sleep_seconds)

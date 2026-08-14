@@ -9,7 +9,7 @@ from .ytdlp_helper import download
 logger = logging.getLogger("yunoballizer.youtube")
 
 
-def harvest(limit: int = 20, accounts: list[str] | None = None) -> None:
+def harvest(limit: int = 20, accounts: list[str] | None = None, skip: int = 0) -> None:
     out_dir = config.DATA_DIR / "youtube"
     archive = out_dir / "archive.txt"
 
@@ -24,5 +24,5 @@ def harvest(limit: int = 20, accounts: list[str] | None = None) -> None:
             shorts_url,
             str(out_dir / "channels" / "%(uploader)s" / "%(id)s.%(ext)s"),
             archive,
-            {"playlistend": limit},
+            {"playliststart": skip + 1, "playlistend": skip + limit},
         )

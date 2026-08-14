@@ -55,11 +55,15 @@ Fill in the files under `~/.config/yunoballizer/`:
 ## Usage
 
 ```bash
-yuno download   # No login required. Full anonymous harvest (for cron)
-yuno discover   # Login required. Discovers new accounts (manual, every 1-2 weeks)
-yuno profile    # Build/refresh taste profile from saved posts
-yuno curate     # Curate against the taste profile
-yuno all        # download + curate (cron entry point)
+yuno download            # No login required. Crawls accounts.txt + urls.txt (Instagram/YouTube/TikTok)
+yuno download @nasa      # Harvest a single account across all three platforms instead of the configured lists
+yuno download -l 5       # Cap harvest at 5 posts per account (default: 20)
+yuno download -s 5 -l 10 # Skip the newest 5 posts, then harvest the next 10 per account
+yuno fetch                # Login required. Adds saved-post authors to Instagram accounts.txt; downloads nothing
+yuno expand               # No login required. Adds @mentions from downloaded Instagram captions
+yuno profile              # Build/refresh a content profile from downloaded Instagram captions
+yuno curate               # Curate downloaded posts against the content profile
+yuno all                  # download + curate (cron entry point)
 ```
 
 For `discover`, log in once with `instaloader --login=your_username` to

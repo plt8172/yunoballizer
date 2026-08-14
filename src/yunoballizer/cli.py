@@ -16,6 +16,13 @@ from .downloaders import urls as urls_mod
 logger = logging.getLogger("yunoballizer")
 
 
+def _non_negative_int(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be 0 or greater")
+    return number
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="yunoballizer",
@@ -29,6 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
     download_parser.add_argument(
         "-l", "--limit", type=int, default=20,
         help="Max posts to harvest per account (default: 20)",
+    )
+    download_parser.add_argument(
+        "-s", "--skip", type=_non_negative_int, default=0,
+        help="Skip the newest N posts per account before harvesting (default: 0)",
     )
     download_parser.add_argument(
         "target", nargs="?", default=None,
@@ -51,10 +62,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_download(limit: int = 20, accounts: list[str] | None = None) -> None:
-    instagram.harvest(limit=limit, accounts=accounts)
-    youtube.harvest(limit=limit, accounts=accounts)
-    tiktok.harvest(limit=limit, accounts=accounts)
+def _run_download(
+    limit: int = 20,
+    skip: int = 0,
+    accounts: list[str] | None = None,
+) -> None:
+    instagram.harvest(limit=limit, skip=skip, accounts=accounts)
+    youtube.harvest(limit=limit, skip=skip, accounts=accounts)
+    tiktok.harvest(limit=limit, skip=skip, accounts=accounts)
     if accounts is None:
         urls_mod.harvest()
 
@@ -90,7 +105,7 @@ def main(argv: list[str] | None = None) -> None:
             if not args.target.startswith("@"):
                 raise SystemExit(f"Invalid target '{args.target}': accounts must start with '@' (e.g. '@nasa')")
             accounts = [args.target[1:]]
-        _run_download(limit=args.limit, accounts=accounts)
+        _run_download(limit=args.limit, skip=args.skip, accounts=accounts)
     elif args.command == "profile":
         profile_mod.build()
     elif args.command == "curate":

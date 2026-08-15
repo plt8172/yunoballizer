@@ -42,18 +42,6 @@ pip install -e ".[curate]"
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-To use `yuno auth login --interactive` (a dedicated login window instead of
-importing cookies from your everyday browser):
-
-```bash
-pip install -e ".[interactive]"
-```
-
-That's enough if you have Chrome or Edge installed -- `--interactive` drives
-that browser directly, no extra download. Only run
-`playwright install chromium` if you want it to fall back to Playwright's
-own bundled Chromium instead (e.g. neither Chrome nor Edge is installed).
-
 ## First-time setup
 
 ```bash
@@ -82,14 +70,14 @@ yuno profile              # Build/refresh a content profile from downloaded Inst
 yuno curate               # Curate downloaded posts against the content profile
 yuno all                  # download + curate (cron entry point)
 
-yuno auth login              # Import the Instagram session from a logged-in browser (Chrome by default) and save it
-yuno auth login -b firefox   # Same, importing from a different browser
-yuno auth login -i           # Open a dedicated login window instead (requires the `interactive` extra, see Install)
-yuno auth login -y           # Skip the confirmation prompt (e.g. for scripted use)
-yuno auth status             # List saved sessions, marking the active one with *
-yuno auth status -c          # Also verify each saved session is still logged in (slower: one request per session)
-yuno auth switch <user>      # Switch which saved session `fetch` uses, without touching the browser
-yuno auth logout [<user>]    # Remove a saved session (defaults to the active one)
+yuno auth login               # Open a login window driving Chrome (default); falls back to cookie import if that fails
+yuno auth login -b edge       # Same, driving Edge instead
+yuno auth login -b firefox    # Not chrome/edge: skips the login window, imports cookies from that browser instead
+yuno auth login -y            # Skip the confirmation prompt (e.g. for scripted use)
+yuno auth status              # List saved sessions, marking the active one with *
+yuno auth status -c           # Also verify each saved session is still logged in (slower: one request per session)
+yuno auth switch <user>       # Switch which saved session `fetch` uses, without touching the browser
+yuno auth logout [<user>]     # Remove a saved session (defaults to the active one)
 ```
 
 `-s`/`--skip` and `-l`/`--limit` mean the same thing across all three
@@ -98,19 +86,19 @@ platforms: skip the N most recent posts per account, then harvest the next L.
 ### Instagram login (`yuno auth`)
 
 Instagram login is still cookie-based -- there's no practical way around
-that. `yuno auth login` gets those cookies one of two ways:
+that. `yuno auth login` defaults to opening a separate, disposable browser
+window and waiting for you to log in inside it, driving your already
+installed Chrome (or `-b edge` for Edge) directly -- no extra download, and
+your everyday browser's own session is never touched. This is the better
+way to add another account: no logging your everyday browser out of one
+account and into another.
 
-- **Default:** imports the session already active in a browser you name
-  with `-b`/`--browser` (Chrome by default). Requires first logging in to
-  `instagram.com` there yourself.
-- **`-i`/`--interactive`:** opens a separate, disposable browser window and
-  waits for you to log in inside it. This is the better way to add another
-  account -- it doesn't touch your everyday browser's session at all, so you
-  never have to log it out of one account to log in as another. With
-  `-b chrome` or `-b edge` (chrome is the default) it drives that
-  already-installed browser directly -- no extra download. Any other `-b`
-  value falls back to Playwright's own bundled Chromium, which does need
-  `playwright install chromium` first.
+If that isn't possible -- `-b` names some other browser, or the login
+window fails to launch for any reason (not installed, closed before you
+finished, etc.) -- `auth login` automatically falls back to importing
+the session already active in that browser instead, telling you why before
+it does. That fallback does require logging in to `instagram.com` in that
+browser yourself first.
 
 Either way, it never asks for or stores your Instagram password -- only
 the session cookies Instagram itself issues after you log in.
@@ -136,12 +124,12 @@ saved session still works before `fetch` runs into it.
 Instagram accounts:
 
 ```bash
-yuno auth login -i            # log in as account A in the login window; saved and made active
-yuno auth login -i            # log in as account B in a fresh login window; B becomes active
-yuno auth status               #   * account-b
-                                #     account-a
-yuno auth switch account-a     # make A active again, no browser needed
-yuno fetch                     # runs against whichever account is active
+yuno auth login                # log in as account A in the login window; saved and made active
+yuno auth login                # log in as account B in a fresh login window; B becomes active
+yuno auth status                #   * account-b
+                                 #     account-a
+yuno auth switch account-a      # make A active again, no browser needed
+yuno fetch                      # runs against whichever account is active
 ```
 
 ## cron setup (macOS/Linux)

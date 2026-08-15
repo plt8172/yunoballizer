@@ -56,22 +56,15 @@ def build_parser() -> argparse.ArgumentParser:
     auth_sub = auth_parser.add_subparsers(dest="auth_command", required=True)
 
     login_parser = auth_sub.add_parser(
-        "login", help="Import an Instagram session from a logged-in browser and save it"
+        "login", help="Log in to Instagram (opens a browser window) and save the session"
     )
     login_parser.add_argument(
         "-b", "--browser", default=auth.DEFAULT_BROWSER,
-        help=f"Without --interactive: browser to import the Instagram login session's cookies from "
-             f"(default: {auth.DEFAULT_BROWSER}). Avoids Instagram's automated-login checkpoint by "
-             "reusing an already-logged-in session. "
-             "With --interactive: 'chrome' or 'edge' drives that already-installed browser directly "
-             f"(no download needed); any other value falls back to Playwright's own Chromium "
-             "(requires `playwright install chromium`).",
-    )
-    login_parser.add_argument(
-        "-i", "--interactive", action="store_true",
-        help="Open a dedicated browser window to log in fresh, instead of importing the session "
-             "already active in --browser. Lets you add another account without switching accounts "
-             "in your everyday browser. Requires the 'playwright' extra.",
+        help=f"Browser to use (default: {auth.DEFAULT_BROWSER}). For 'chrome' or 'edge', opens a "
+             "dedicated login window driving that already-installed browser directly (no download "
+             "needed) -- the better way to add another account, since it never touches an everyday "
+             "browser's own session. For any other value, or if that window can't be opened, falls "
+             "back to importing the session already active in that browser instead.",
     )
     login_parser.add_argument(
         "-y", "--yes", action="store_true",
@@ -158,7 +151,7 @@ def main(argv: list[str] | None = None) -> None:
         fetch.run()
     elif args.command == "auth":
         if args.auth_command == "login":
-            auth.login(browser=args.browser, interactive=args.interactive, assume_yes=args.yes)
+            auth.login(browser=args.browser, assume_yes=args.yes)
         elif args.auth_command == "status":
             auth.status(check=args.check)
         elif args.auth_command == "switch":

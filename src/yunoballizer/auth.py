@@ -1,17 +1,17 @@
 """Manages Instagram login sessions used by `fetch`.
 
 Instagram cookies are still the underlying auth mechanism -- there's no
-practical alternative to that. Two ways to obtain them:
+practical alternative to that. `auth login` gets those cookies by opening a
+dedicated, disposable browser window and waiting for the user to log in
+inside it, driving an already-installed Chrome or Edge directly (via
+Playwright's `channel` option -- no separate browser download). This is
+preferred over reading whatever's already logged into an everyday browser,
+since it doesn't require logging that browser in and out of accounts to add
+another one.
 
-- Import from an already-logged-in everyday browser (the default). Only
-  ever sees whichever account is currently active there.
-- `--interactive`: open a dedicated, disposable browser window, let the
-  user log in inside it, and read the session straight out of that window.
-  This is the better way to add another account, since it doesn't require
-  logging the everyday browser in and out of accounts. When possible it
-  drives an already-installed Chrome/Edge (via Playwright's `channel`
-  option) rather than a separately downloaded browser -- see
-  INTERACTIVE_LOGIN_CHANNELS.
+If that isn't available -- a browser other than Chrome/Edge, or the window
+fails to launch for any reason -- login automatically falls back to
+importing the session already active in an everyday browser instead.
 
 Either way, instead of fetch silently reusing whatever session it finds on
 every run, `auth login` imports it once, asks the user to confirm it's the
@@ -148,50 +148,36 @@ def _interactive_browser_login(
     browser: str = DEFAULT_BROWSER,
     timeout_seconds: int = INTERACTIVE_LOGIN_TIMEOUT_SECONDS,
 ) -> Any:
-    """Open a dedicated browser window, wait for the user to log in, and return an authenticated loader.
+    """Open a window driving the installed Chrome/Edge, wait for login, and return an authenticated loader.
 
     Unlike importing from the everyday browser, this doesn't depend on
     whatever account happens to already be logged in there -- the user logs
     in fresh, in a disposable window, for whichever account they want to add.
 
-    When `browser` is "chrome" or "edge", this drives the system's actual
-    installed browser (via Playwright's `channel` option) rather than
-    Playwright's own bundled Chromium -- no `playwright install` step needed
-    as long as that browser is already installed. Any other value falls
-    back to Playwright's bundled Chromium, which does require
-    `playwright install chromium`.
+    Only "chrome" and "edge" are supported (Playwright's `channel` option
+    only drives those two browser families). Raises SystemExit -- with a
+    message describing what went wrong -- if that's not the case, if the
+    browser can't be launched, or if the user doesn't log in within the
+    timeout. Callers are expected to catch this and fall back to
+    _import_from_browser (see _obtain_session).
     """
+    channel = INTERACTIVE_LOGIN_CHANNELS.get(browser)
+    if channel is None:
+        raise SystemExit(f"Interactive login isn't supported for {browser} (only chrome/edge).")
+
     try:
         from playwright.sync_api import sync_playwright
         import instaloader
     except ImportError as exc:
-        raise SystemExit(
-            "Interactive login requires the 'playwright' package: "
-            "pip install yunoballizer[interactive]"
-        ) from exc
+        raise SystemExit(f"The 'playwright' package is not available: {exc}") from exc
 
-    channel = INTERACTIVE_LOGIN_CHANNELS.get(browser)
-    print("Opening a browser window for Instagram login. Log in there, then return here.")
+    print(f"Opening {browser} for Instagram login. Log in there, then return here.")
 
     with sync_playwright() as p:
         try:
-            launch_kwargs = {"headless": False}
-            if channel:
-                launch_kwargs["channel"] = channel
-            browser_instance = p.chromium.launch(**launch_kwargs)
+            browser_instance = p.chromium.launch(headless=False, channel=channel)
         except Exception as exc:
-            if channel:
-                hint = (
-                    f"Could not launch installed {browser}: {exc}\n"
-                    f"Make sure {browser} is installed, or pass a different -b/--browser."
-                )
-            else:
-                hint = (
-                    f"Could not launch Playwright's bundled Chromium: {exc}\n"
-                    "Run `playwright install chromium`, or pass -b chrome / -b edge "
-                    "to drive an already-installed browser instead (no download needed)."
-                )
-            raise SystemExit(hint) from exc
+            raise SystemExit(f"Could not launch installed {browser}: {exc}") from exc
 
         try:
             page = browser_instance.new_page()
@@ -222,13 +208,31 @@ def _interactive_browser_login(
     return loader
 
 
+def _obtain_session(browser: str) -> tuple[Any, str]:
+    """Get an authenticated loader, preferring the interactive login window.
+
+    Falls back to importing cookies from an already-logged-in browser when
+    interactive login isn't available for `browser`, or fails for any
+    reason (not installed, launch error, timeout, ...).
+    """
+    if browser not in INTERACTIVE_LOGIN_CHANNELS:
+        print(f"Interactive login isn't supported for {browser}. Loading browser cookies instead...")
+        return _import_from_browser(browser), browser
+
+    try:
+        loader = _interactive_browser_login(browser)
+        return loader, f"the login window ({browser})"
+    except SystemExit as exc:
+        print(f"Interactive login failed: {exc}\nLoading browser cookies instead...")
+        return _import_from_browser(browser), browser
+
+
 def login(
     browser: str = DEFAULT_BROWSER,
-    interactive: bool = False,
     assume_yes: bool = False,
     confirm: Callable[[str], str] = input,
 ) -> str:
-    """Obtain a session (from the everyday browser, or an interactive login window), confirm it, and save it.
+    """Obtain a session, confirm it with the user, and save it for reuse.
 
     Cookie-based import has no way to ask "which account should I use" --
     it only ever sees whichever session is currently active. Asking for
@@ -237,12 +241,7 @@ def login(
     that's what happened to be logged in. Pass assume_yes to skip that
     prompt (e.g. for scripted use).
     """
-    if interactive:
-        loader = _interactive_browser_login(browser)
-        source = f"the login window ({browser})"
-    else:
-        loader = _import_from_browser(browser)
-        source = browser
+    loader, source = _obtain_session(browser)
     username = loader.context.username
 
     if not assume_yes:

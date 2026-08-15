@@ -147,6 +147,22 @@ def _fake_sync_playwright_module(
     return SimpleNamespace(sync_playwright=lambda: _Cm())
 
 
+def _logged_in_fixtures():
+    session_cookie = {
+        "name": "sessionid", "value": "abc123", "domain": ".instagram.com",
+        "path": "/", "secure": True, "httpOnly": True, "expires": -1,
+    }
+    page = _FakePage(cookies_sequence=[[session_cookie]])
+    browser = _FakeBrowser(page)
+    instaloader = SimpleNamespace(
+        Instaloader=lambda **kwargs: SimpleNamespace(
+            context=SimpleNamespace(username=None, update_cookies=lambda jar: None),
+            test_login=lambda: "carol",
+        )
+    )
+    return page, browser, instaloader
+
+
 class InteractiveBrowserLoginTests(unittest.TestCase):
     def test_returns_loader_once_sessionid_cookie_appears(self) -> None:
         session_cookie = {
@@ -202,23 +218,8 @@ class InteractiveBrowserLoginTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 auth._interactive_browser_login()
 
-    def _login_ready_fixtures(self):
-        session_cookie = {
-            "name": "sessionid", "value": "abc123", "domain": ".instagram.com",
-            "path": "/", "secure": True, "httpOnly": True, "expires": -1,
-        }
-        page = _FakePage(cookies_sequence=[[session_cookie]])
-        browser = _FakeBrowser(page)
-        instaloader = SimpleNamespace(
-            Instaloader=lambda **kwargs: SimpleNamespace(
-                context=SimpleNamespace(username=None, update_cookies=lambda jar: None),
-                test_login=lambda: "carol",
-            )
-        )
-        return page, browser, instaloader
-
     def test_default_browser_drives_installed_chrome_via_channel(self) -> None:
-        page, browser, instaloader = self._login_ready_fixtures()
+        page, browser, instaloader = _logged_in_fixtures()
         launch_calls: list[dict] = []
         sync_api = _fake_sync_playwright_module(page, browser, launch_calls=launch_calls)
 
@@ -231,7 +232,7 @@ class InteractiveBrowserLoginTests(unittest.TestCase):
         self.assertEqual(launch_calls, [{"headless": False, "channel": "chrome"}])
 
     def test_edge_maps_to_msedge_channel(self) -> None:
-        page, browser, instaloader = self._login_ready_fixtures()
+        page, browser, instaloader = _logged_in_fixtures()
         launch_calls: list[dict] = []
         sync_api = _fake_sync_playwright_module(page, browser, launch_calls=launch_calls)
 
@@ -243,20 +244,14 @@ class InteractiveBrowserLoginTests(unittest.TestCase):
 
         self.assertEqual(launch_calls, [{"headless": False, "channel": "msedge"}])
 
-    def test_unrecognized_browser_falls_back_to_bundled_chromium(self) -> None:
-        page, browser, instaloader = self._login_ready_fixtures()
-        launch_calls: list[dict] = []
-        sync_api = _fake_sync_playwright_module(page, browser, launch_calls=launch_calls)
-
-        with patch.dict(
-            "sys.modules",
-            {"playwright": SimpleNamespace(), "playwright.sync_api": sync_api, "instaloader": instaloader},
-        ):
+    def test_unsupported_browser_raises_without_touching_playwright(self) -> None:
+        # No sys.modules patching -- this must fail before even trying to import playwright.
+        with self.assertRaises(SystemExit) as cm:
             auth._interactive_browser_login(browser="firefox")
 
-        self.assertEqual(launch_calls, [{"headless": False}])
+        self.assertIn("firefox", str(cm.exception))
 
-    def test_launch_failure_for_known_channel_hints_at_the_browser(self) -> None:
+    def test_launch_failure_hints_at_the_browser(self) -> None:
         page = _FakePage(cookies_sequence=[[]])
         browser = _FakeBrowser(page)
         sync_api = _fake_sync_playwright_module(page, browser, launch_error=RuntimeError("boom"))
@@ -271,20 +266,51 @@ class InteractiveBrowserLoginTests(unittest.TestCase):
 
         self.assertIn("chrome", str(cm.exception))
 
-    def test_launch_failure_for_bundled_chromium_hints_at_install(self) -> None:
-        page = _FakePage(cookies_sequence=[[]])
-        browser = _FakeBrowser(page)
-        sync_api = _fake_sync_playwright_module(page, browser, launch_error=RuntimeError("boom"))
-        instaloader = SimpleNamespace(Instaloader=lambda **kwargs: self.fail("should not be reached"))
 
-        with patch.dict(
-            "sys.modules",
-            {"playwright": SimpleNamespace(), "playwright.sync_api": sync_api, "instaloader": instaloader},
+class ObtainSessionTests(unittest.TestCase):
+    def test_prefers_interactive_login_for_chrome(self) -> None:
+        loader = object()
+        with (
+            patch.object(auth, "_interactive_browser_login", return_value=loader) as mock_interactive,
+            patch.object(auth, "_import_from_browser") as mock_cookie_import,
         ):
-            with self.assertRaises(SystemExit) as cm:
-                auth._interactive_browser_login(browser="firefox")
+            result_loader, source = auth._obtain_session("chrome")
 
-        self.assertIn("playwright install chromium", str(cm.exception))
+        mock_interactive.assert_called_once_with("chrome")
+        mock_cookie_import.assert_not_called()
+        self.assertIs(result_loader, loader)
+        self.assertIn("login window", source)
+
+    def test_falls_back_to_cookies_when_interactive_fails(self) -> None:
+        loader = object()
+        out = io.StringIO()
+        with (
+            patch.object(auth, "_interactive_browser_login", side_effect=SystemExit("could not launch chrome")),
+            patch.object(auth, "_import_from_browser", return_value=loader) as mock_cookie_import,
+            redirect_stdout(out),
+        ):
+            result_loader, source = auth._obtain_session("chrome")
+
+        mock_cookie_import.assert_called_once_with("chrome")
+        self.assertIs(result_loader, loader)
+        self.assertEqual(source, "chrome")
+        self.assertIn("could not launch chrome", out.getvalue())
+
+    def test_skips_interactive_for_unsupported_browser(self) -> None:
+        loader = object()
+        out = io.StringIO()
+        with (
+            patch.object(auth, "_interactive_browser_login") as mock_interactive,
+            patch.object(auth, "_import_from_browser", return_value=loader) as mock_cookie_import,
+            redirect_stdout(out),
+        ):
+            result_loader, source = auth._obtain_session("firefox")
+
+        mock_interactive.assert_not_called()
+        mock_cookie_import.assert_called_once_with("firefox")
+        self.assertIs(result_loader, loader)
+        self.assertEqual(source, "firefox")
+        self.assertIn("isn't supported for firefox", out.getvalue())
 
 
 class AuthSessionTests(unittest.TestCase):
@@ -310,9 +336,14 @@ class AuthSessionTests(unittest.TestCase):
             _saved=saved,
         )
 
+    def _login_as(self, username: str, **login_kwargs) -> None:
+        loader = self._fake_loader(username)
+        with patch.object(auth, "_obtain_session", return_value=(loader, "chrome")):
+            auth.login(browser="chrome", confirm=lambda prompt: "y", **login_kwargs)
+
     def test_login_saves_session_and_sets_active(self) -> None:
         loader = self._fake_loader("alice")
-        with patch.object(auth, "_import_from_browser", return_value=loader):
+        with patch.object(auth, "_obtain_session", return_value=(loader, "chrome")):
             username = auth.login(browser="chrome", confirm=lambda prompt: "y")
 
         self.assertEqual(username, "alice")
@@ -322,23 +353,19 @@ class AuthSessionTests(unittest.TestCase):
 
     def test_login_declined_raises_and_saves_nothing(self) -> None:
         loader = self._fake_loader("alice")
-        with patch.object(auth, "_import_from_browser", return_value=loader):
+        with patch.object(auth, "_obtain_session", return_value=(loader, "chrome")):
             with self.assertRaises(SystemExit):
                 auth.login(browser="chrome", confirm=lambda prompt: "n")
 
         self.assertEqual(auth.saved_usernames(), [])
         self.assertIsNone(auth.active_username())
 
-    def test_login_interactive_uses_login_window_instead_of_browser_cookies(self) -> None:
+    def test_login_uses_obtain_session(self) -> None:
         loader = self._fake_loader("carol")
-        with (
-            patch.object(auth, "_interactive_browser_login", return_value=loader) as mock_interactive,
-            patch.object(auth, "_import_from_browser") as mock_cookie_import,
-        ):
-            username = auth.login(interactive=True, confirm=lambda prompt: "y")
+        with patch.object(auth, "_obtain_session", return_value=(loader, "the login window (chrome)")) as mock_obtain:
+            username = auth.login(browser="chrome", confirm=lambda prompt: "y")
 
-        mock_interactive.assert_called_once()
-        mock_cookie_import.assert_not_called()
+        mock_obtain.assert_called_once_with("chrome")
         self.assertEqual(username, "carol")
         self.assertEqual(auth.active_username(), "carol")
 
@@ -348,16 +375,14 @@ class AuthSessionTests(unittest.TestCase):
         def confirm_should_not_be_called(prompt: str) -> str:
             self.fail("confirm() should not be called when assume_yes=True")
 
-        with patch.object(auth, "_import_from_browser", return_value=loader):
+        with patch.object(auth, "_obtain_session", return_value=(loader, "chrome")):
             username = auth.login(browser="chrome", assume_yes=True, confirm=confirm_should_not_be_called)
 
         self.assertEqual(username, "alice")
         self.assertEqual(auth.active_username(), "alice")
 
     def test_login_sets_restrictive_permissions(self) -> None:
-        loader = self._fake_loader("alice")
-        with patch.object(auth, "_import_from_browser", return_value=loader):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
+        self._login_as("alice")
 
         session_mode = stat.S_IMODE(auth._session_file("alice").stat().st_mode)
         dir_mode = stat.S_IMODE(auth._sessions_dir().stat().st_mode)
@@ -368,19 +393,15 @@ class AuthSessionTests(unittest.TestCase):
         self.assertEqual(active_mode, 0o600)
 
     def test_second_login_adds_session_without_switching_active(self) -> None:
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("alice")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("bob")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
+        self._login_as("alice")
+        self._login_as("bob")
 
         self.assertEqual(auth.saved_usernames(), ["alice", "bob"])
         self.assertEqual(auth.active_username(), "bob")
 
     def test_status_marks_active_session(self) -> None:
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("alice")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("bob")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
+        self._login_as("alice")
+        self._login_as("bob")
 
         out = io.StringIO()
         with redirect_stdout(out):
@@ -391,10 +412,8 @@ class AuthSessionTests(unittest.TestCase):
         self.assertIn("  alice", output)
 
     def test_status_check_flags_expired_sessions(self) -> None:
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("alice")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("bob")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
+        self._login_as("alice")
+        self._login_as("bob")
 
         def load_session_from_file(username: str, path: str) -> None:
             if username == "bob":
@@ -421,10 +440,8 @@ class AuthSessionTests(unittest.TestCase):
         self.assertIn("No saved Instagram sessions", out.getvalue())
 
     def test_switch_updates_active_session(self) -> None:
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("alice")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("bob")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
+        self._login_as("alice")
+        self._login_as("bob")
 
         auth.switch("alice")
 
@@ -435,8 +452,7 @@ class AuthSessionTests(unittest.TestCase):
             auth.switch("nobody")
 
     def test_logout_removes_active_session(self) -> None:
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("alice")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
+        self._login_as("alice")
 
         auth.logout()
 
@@ -444,10 +460,8 @@ class AuthSessionTests(unittest.TestCase):
         self.assertIsNone(auth.active_username())
 
     def test_logout_specific_username_keeps_other_sessions_active(self) -> None:
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("alice")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("bob")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
+        self._login_as("alice")
+        self._login_as("bob")
 
         auth.logout("alice")
 
@@ -463,8 +477,7 @@ class AuthSessionTests(unittest.TestCase):
             auth.get_loader()
 
     def test_get_loader_loads_active_session(self) -> None:
-        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("alice")):
-            auth.login(browser="chrome", confirm=lambda prompt: "y")
+        self._login_as("alice")
 
         loaded_calls = []
         loader = SimpleNamespace(

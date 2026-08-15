@@ -178,6 +178,24 @@ def organize_ytdlp_tree(root: Path) -> None:
             organize_ytdlp_post_dir(directory)
 
 
+def find_caption(media_path: Path) -> str:
+    """A post's caption lives beside its media, in the same bundle directory."""
+    post_dir = media_path.parent
+    caption_path = post_dir / "caption.txt"
+    if caption_path.exists():
+        return caption_path.read_text(encoding="utf-8", errors="ignore")
+
+    metadata_path = post_dir / "metadata.json.xz"
+    if metadata_path.exists():
+        try:
+            with lzma.open(metadata_path) as f:
+                data = json.loads(f.read())
+        except Exception:
+            return ""
+        return data.get("description") or data.get("title") or ""
+    return ""
+
+
 # --------------------------------------------------------------------------
 # review/: a disposable flat symlink index over sources/.
 # --------------------------------------------------------------------------

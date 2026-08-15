@@ -119,68 +119,86 @@ class ExportTests(unittest.TestCase):
 
 
 class PickTests(unittest.TestCase):
-    def _review_dir_with_link(self, root: Path) -> tuple[Path, Path, Path]:
+    def _review_dir_with_links(self, root: Path, count: int) -> tuple[Path, list[Path]]:
         review_dir = root / "review"
         review_dir.mkdir()
-        real_file = root / "real.jpg"
-        real_file.write_bytes(b"data")
-        link = review_dir / "link.jpg"
-        link.symlink_to(real_file)
-        return review_dir, real_file, link
+        real_files = []
+        for i in range(count):
+            real_file = root / f"real{i}.jpg"
+            real_file.write_bytes(f"data{i}".encode())
+            link = review_dir / f"link{i}.jpg"
+            link.symlink_to(real_file)
+            real_files.append(real_file.resolve())
+        return review_dir, real_files
 
-    def test_feeds_file_list_to_fzf_and_returns_resolved_marks(self) -> None:
+    def test_navigation_and_toggle_selects_the_right_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            review_dir, real_file, link = self._review_dir_with_link(root)
+            review_dir, real_files = self._review_dir_with_links(Path(tmpdir), 3)
+            keys = iter(["right", "s", "right", "s", "left", "q"])
 
-            fake_result = subprocess.CompletedProcess(
-                args=["fzf"], returncode=0, stdout=f"{link}\n", stderr=""
-            )
-            with patch("subprocess.run", return_value=fake_result) as mock_run:
+            with (
+                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(select, "_render_item"),
+            ):
                 marked = select.pick(source_dir=review_dir)
 
-            mock_run.assert_called_once()
-            _, kwargs = mock_run.call_args
-            self.assertEqual(kwargs["input"], str(link))
-            self.assertEqual(marked, [real_file.resolve()])
+            self.assertEqual(set(marked), {real_files[1], real_files[2]})
 
-    def test_empty_review_dir_skips_fzf_entirely(self) -> None:
+    def test_toggling_the_same_item_twice_deselects_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, _ = self._review_dir_with_links(Path(tmpdir), 2)
+            keys = iter(["s", "s", "q"])
+
+            with (
+                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(select, "_render_item"),
+            ):
+                marked = select.pick(source_dir=review_dir)
+
+            self.assertEqual(marked, [])
+
+    def test_index_clamps_at_bounds_instead_of_wrapping(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, real_files = self._review_dir_with_links(Path(tmpdir), 2)
+            keys = iter(["right", "right", "right", "s", "q"])
+
+            with (
+                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(select, "_render_item"),
+            ):
+                marked = select.pick(source_dir=review_dir)
+
+            self.assertEqual(marked, [real_files[1]])
+
+    def test_o_key_opens_current_item_natively(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, real_files = self._review_dir_with_links(Path(tmpdir), 2)
+            keys = iter(["right", "o", "q"])
+
+            with (
+                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(select, "_render_item"),
+                patch.object(select, "open_native") as mock_open,
+            ):
+                select.pick(source_dir=review_dir)
+
+            mock_open.assert_called_once()
+            self.assertEqual(mock_open.call_args[0][0].resolve(), real_files[1])
+
+    def test_empty_review_dir_returns_immediately_without_reading_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             review_dir = Path(tmpdir) / "review"
             review_dir.mkdir()
-            with patch("subprocess.run") as mock_run:
+
+            with (
+                patch.object(select, "_read_key") as mock_read_key,
+                patch.object(select, "_render_item") as mock_render,
+            ):
                 marked = select.pick(source_dir=review_dir)
 
-            mock_run.assert_not_called()
+            mock_read_key.assert_not_called()
+            mock_render.assert_not_called()
             self.assertEqual(marked, [])
-
-    def test_missing_fzf_binary_raises_system_exit(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            review_dir, _, _ = self._review_dir_with_link(Path(tmpdir))
-            with patch("subprocess.run", side_effect=FileNotFoundError):
-                with self.assertRaises(SystemExit):
-                    select.pick(source_dir=review_dir)
-
-    def test_cancelled_fzf_returns_empty_list(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            review_dir, _, _ = self._review_dir_with_link(Path(tmpdir))
-            fake_result = subprocess.CompletedProcess(
-                args=["fzf"], returncode=select.FZF_CANCELLED, stdout="", stderr=""
-            )
-            with patch("subprocess.run", return_value=fake_result):
-                marked = select.pick(source_dir=review_dir)
-
-            self.assertEqual(marked, [])
-
-    def test_fzf_error_raises_system_exit(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            review_dir, _, _ = self._review_dir_with_link(Path(tmpdir))
-            fake_result = subprocess.CompletedProcess(
-                args=["fzf"], returncode=2, stdout="", stderr="boom"
-            )
-            with patch("subprocess.run", return_value=fake_result):
-                with self.assertRaises(SystemExit):
-                    select.pick(source_dir=review_dir)
 
 
 class RenderPreviewTests(unittest.TestCase):

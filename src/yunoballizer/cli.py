@@ -6,7 +6,6 @@ import base64
 import logging
 import sys
 import zlib
-from pathlib import Path
 
 from . import config, expand, fetch, prune, storage
 from . import profile as profile_mod
@@ -32,10 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
 
-    sub = parser.add_subparsers(
-        dest="command", required=True,
-        metavar="{download,fetch,expand,profile,curate,select,export,all,prune}",
-    )
+    sub = parser.add_subparsers(dest="command", required=True)
 
     download_parser = sub.add_parser("download", help="No login required. Anonymous harvesting of accounts + urls.txt")
     download_parser.add_argument(
@@ -64,19 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "select",
-        help="Browse review/ in fzf (Tab to mark, Enter to confirm, o to open in your OS's default viewer/player)",
+        help="Browse review/ one item at a time (arrows to move, s to select/deselect, "
+             "o to open in your OS's default viewer/player, Enter/q to finish)",
     )
     sub.add_parser("export", help="Copy/hardlink selected media into selected/")
 
     sub.add_parser("all", help="Run download then curate (cron entry point)")
-
-    # Internal plumbing: fzf's --preview and 'o' keybind shell out to these
-    # rather than an inline shell script, so `select.pick()` never needs to
-    # know which shell fzf happens to invoke on a given platform.
-    preview_parser = sub.add_parser("_preview")
-    preview_parser.add_argument("path")
-    open_parser = sub.add_parser("_open")
-    open_parser.add_argument("path")
 
     prune_parser = sub.add_parser(
         "prune",
@@ -149,10 +138,6 @@ def main(argv: list[str] | None = None) -> None:
         select_mod.run_select()
     elif args.command == "export":
         select_mod.run_export()
-    elif args.command == "_preview":
-        select_mod.render_preview(Path(args.path))
-    elif args.command == "_open":
-        select_mod.open_native(Path(args.path))
     elif args.command == "all":
         _run_download()
         if (config.DERIVED_DIR / profile_mod.PROFILE_FILENAME).exists():

@@ -1,14 +1,20 @@
-"""Manual photo selection: mark favorites in review/ with fzf, record the
-choice in a manifest, then materialize it into selected/.
+"""Manual photo selection: browse review/ one item at a time, record picks in
+a manifest, then materialize the manifest into selected/.
 
 Deliberately decoupled from the filesystem: review/ stays a disposable
 symlink index (see storage.py), and the "what did I pick" state lives in
 selection_log.json instead of being encoded via symlinks or deletions.
 
-fzf's preview pane and the 'o' keybind shell out to this project's own
-`yuno _preview`/`yuno _open` subcommands (see cli.py) rather than an inline
-shell script, so nothing here depends on which shell fzf happens to invoke
-on a given platform (POSIX sh vs. Windows cmd.exe).
+The picker shows one item at a time (account / image / caption) rather than
+a live list-plus-preview split. That's not just simplicity for its own sake:
+splitting the screen between a navigable list and a concurrently-rendered
+image (as fzf's --preview does) means two processes fight over the same
+terminal at once -- the list reads keystrokes from stdin while the image
+tool queries the terminal for cursor position over that same stdin, and the
+terminal's pixel-per-cell report is often unreliable inside a piped preview
+subprocess. Both cause real, frequent corruption in practice. Rendering
+one full-width item at a time means only one process ever touches the
+terminal at a time, and it always finishes before the next keypress is read.
 """
 from __future__ import annotations
 
@@ -23,11 +29,12 @@ import time
 from pathlib import Path
 
 from . import config
-from .storage import VIDEO_EXTS, review_link_name
+from .storage import VIDEO_EXTS, find_caption, review_link_name
 
 logger = logging.getLogger("yunoballizer.select")
 
-FZF_CANCELLED = 130
+_ARROW_KEYS = {"A": "up", "B": "down", "C": "right", "D": "left"}
+_WIN_ARROW_KEYS = {"H": "up", "P": "down", "M": "right", "K": "left"}
 
 
 def _load_log() -> dict:
@@ -41,8 +48,57 @@ def _save_log(log: dict) -> None:
     config.SELECTION_LOG_PATH.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _read_key() -> str:
+    """Block for a single raw keypress, normalizing arrow keys to up/down/left/right."""
+    if sys.platform == "win32":
+        import msvcrt
+
+        ch = msvcrt.getch()
+        if ch in (b"\x00", b"\xe0"):
+            ch2 = msvcrt.getch()
+            return _WIN_ARROW_KEYS.get(ch2.decode(errors="ignore"), "")
+        return ch.decode(errors="ignore")
+
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        ch = sys.stdin.read(1)
+        if ch == "\x1b":
+            if sys.stdin.read(1) == "[":
+                return _ARROW_KEYS.get(sys.stdin.read(1), "")
+            return "esc"
+        return ch
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
+def _account_label(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(config.SOURCES_DIR).parent)
+    except ValueError:
+        return path.name
+
+
+def _render_item(path: Path, index: int, total: int, marked: set[Path]) -> None:
+    print("\x1b[2J\x1b[H", end="")
+    star = " [SELECTED]" if path.resolve() in marked else ""
+    print(f"[{index + 1}/{total}] {_account_label(path)}{star}")
+    print()
+    render_preview(path)
+    print()
+    caption = find_caption(path).strip()
+    if caption:
+        print(caption[:300])
+        print()
+    print("<-/-> move   s select/deselect   o open natively   Enter/q finish")
+
+
 def pick(source_dir: Path | None = None) -> list[Path]:
-    """Browse source_dir in fzf (Tab to mark, Enter to confirm) and return the marked files.
+    """Browse source_dir one item at a time and return whatever got marked with 's'.
 
     Marked paths are resolved (symlinks in review/ followed) so callers get
     the canonical sources/ path rather than the disposable review/ link.
@@ -52,33 +108,35 @@ def pick(source_dir: Path | None = None) -> list[Path]:
     if not files:
         return []
 
-    cmd = [
-        "fzf", "--multi",
-        "--preview", "yuno _preview {}",
-        "--preview-window", "right,60%",
-        "--bind", "o:execute-silent(yuno _open {})",
-    ]
-    try:
-        result = subprocess.run(
-            cmd, input="\n".join(str(p) for p in files), capture_output=True, text=True,
-        )
-    except FileNotFoundError:
-        raise SystemExit("fzf not found. Install fzf to use `yuno select`.")
+    index = 0
+    marked: set[Path] = set()
+    while True:
+        _render_item(files[index], index, len(files), marked)
+        key = _read_key()
+        if key in ("\r", "\n", "q", "\x03"):
+            break
+        elif key in ("left", "up"):
+            index = max(index - 1, 0)
+        elif key in ("right", "down"):
+            index = min(index + 1, len(files) - 1)
+        elif key == "s":
+            resolved = files[index].resolve()
+            if resolved in marked:
+                marked.remove(resolved)
+            else:
+                marked.add(resolved)
+        elif key == "o":
+            open_native(files[index])
 
-    if result.returncode == FZF_CANCELLED:
-        return []
-    if result.returncode != 0:
-        raise SystemExit(f"fzf exited with an error: {result.stderr.strip()}")
-
-    return [Path(line).resolve() for line in result.stdout.splitlines() if line.strip()]
+    return list(marked)
 
 
 def render_preview(path: Path) -> None:
-    """Print a preview of path to stdout for fzf's preview pane.
+    """Print a preview of the current item to stdout, sized to the terminal width.
 
     Videos get a single representative frame (via ffmpeg) shown as an image;
     anything ffmpeg/viu can't handle degrades to a placeholder line instead
-    of raising, since this runs once per highlighted item in the picker.
+    of raising, since this runs once per item shown in the picker.
     """
     if not path.exists():
         print(f"[missing: {path.name}]")
@@ -100,7 +158,7 @@ def render_preview(path: Path) -> None:
             tmp_frame.unlink(missing_ok=True)
             return
 
-    width = os.environ.get("FZF_PREVIEW_COLUMNS", "80")
+    width = str(shutil.get_terminal_size().columns)
     try:
         subprocess.run(["viu", "-w", width, str(target)])
     except FileNotFoundError:

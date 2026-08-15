@@ -7,7 +7,7 @@ import logging
 import sys
 import zlib
 
-from . import config, expand, fetch, prune, storage
+from . import auth, config, expand, fetch, prune, storage
 from . import profile as profile_mod
 from . import curate as curate_mod
 from .downloaders import instagram, tiktok, youtube
@@ -47,12 +47,36 @@ def build_parser() -> argparse.ArgumentParser:
              "Must start with '@' for an account, e.g. '@nasa' (hashtag support may come later)",
     )
 
-    fetch_parser = sub.add_parser("fetch", help="Requires login. Adds saved-post authors to Instagram accounts.txt")
-    fetch_parser.add_argument(
-        "-b", "--browser", default=fetch.DEFAULT_BROWSER,
-        help=f"Browser to import the Instagram login session's cookies from (default: {fetch.DEFAULT_BROWSER}). "
+    sub.add_parser(
+        "fetch",
+        help="Requires an active session (see `auth login`). Adds saved-post authors to Instagram accounts.txt",
+    )
+
+    auth_parser = sub.add_parser("auth", help="Manage saved Instagram login sessions used by fetch")
+    auth_sub = auth_parser.add_subparsers(dest="auth_command", required=True)
+
+    login_parser = auth_sub.add_parser(
+        "login", help="Import an Instagram session from a logged-in browser and save it"
+    )
+    login_parser.add_argument(
+        "-b", "--browser", default=auth.DEFAULT_BROWSER,
+        help=f"Browser to import the Instagram login session's cookies from (default: {auth.DEFAULT_BROWSER}). "
              "Avoids Instagram's automated-login checkpoint by reusing an already-logged-in session.",
     )
+
+    auth_sub.add_parser("status", help="List saved Instagram sessions and show which one is active")
+
+    switch_parser = auth_sub.add_parser("switch", help="Switch the active Instagram session")
+    switch_parser.add_argument("username", help="Instagram username of a previously saved session")
+
+    logout_parser = auth_sub.add_parser(
+        "logout", help="Remove a saved Instagram session (defaults to the active one)"
+    )
+    logout_parser.add_argument(
+        "username", nargs="?", default=None,
+        help="Instagram username to remove (default: the active session)",
+    )
+
     sub.add_parser("expand", help="No login required. Expands Instagram accounts.txt from downloaded caption mentions")
     sub.add_parser("profile", help="Build/refresh the content profile from downloaded Instagram captions")
     sub.add_parser("curate", help="Curate new posts against the content profile")
@@ -111,7 +135,16 @@ def main(argv: list[str] | None = None) -> None:
     config.ensure_config()
 
     if args.command == "fetch":
-        fetch.run(browser=args.browser)
+        fetch.run()
+    elif args.command == "auth":
+        if args.auth_command == "login":
+            auth.login(browser=args.browser)
+        elif args.auth_command == "status":
+            auth.status()
+        elif args.auth_command == "switch":
+            auth.switch(args.username)
+        elif args.auth_command == "logout":
+            auth.logout(args.username)
     elif args.command == "expand":
         _run_expand()
     elif args.command == "download":

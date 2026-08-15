@@ -11,13 +11,15 @@ authors of posts you saved. Fetch stores no media or captions; anonymous account
 crawling handles all downloads.
 
 ```
-[manual, login]      yuno fetch     -> adds saved-post authors to accounts.txt
-                                            |
-[frequent, no login] yuno download  -> downloads accounts.txt + urls.txt across
-                                        Instagram/YouTube/TikTok
-                                            |
-[manual, no login]   yuno expand    -> adds @mentions found in downloaded
-                                        Instagram captions to accounts.txt
+[once/switch]         yuno auth login -> imports & saves an Instagram session
+                                              |
+[manual, uses saved   yuno fetch      -> adds saved-post authors to accounts.txt
+ session]                                    |
+[frequent, no login]  yuno download   -> downloads accounts.txt + urls.txt across
+                                         Instagram/YouTube/TikTok
+                                              |
+[manual, no login]    yuno expand     -> adds @mentions found in downloaded
+                                         Instagram captions to accounts.txt
 ```
 
 `yuno profile` builds a content profile from downloaded Instagram captions,
@@ -62,19 +64,46 @@ yuno download            # No login required. Crawls accounts.txt + urls.txt (In
 yuno download @nasa      # Harvest a single account across all three platforms instead of the configured lists
 yuno download -l 5       # Cap harvest at 5 posts per account (default: 20)
 yuno download -s 5 -l 10 # Skip the newest 5 posts, then harvest the next 10 per account
-yuno fetch                # Login required. Adds saved-post authors to Instagram accounts.txt; downloads nothing
+yuno fetch                # Uses the active saved session. Adds saved-post authors to Instagram accounts.txt; downloads nothing
 yuno expand               # No login required. Adds @mentions from downloaded Instagram captions
 yuno profile              # Build/refresh a content profile from downloaded Instagram captions
 yuno curate               # Curate downloaded posts against the content profile
 yuno all                  # download + curate (cron entry point)
+
+yuno auth login           # Import the Instagram session from a logged-in browser (Chrome by default) and save it
+yuno auth login -b firefox  # Same, importing from a different browser
+yuno auth status          # List saved sessions, marking the active one with *
+yuno auth switch <user>   # Switch which saved session `fetch` uses, without touching the browser
+yuno auth logout [<user>] # Remove a saved session (defaults to the active one)
 ```
 
 `-s`/`--skip` and `-l`/`--limit` mean the same thing across all three
 platforms: skip the N most recent posts per account, then harvest the next L.
 
-For `fetch`, first log in to `instagram.com` in the browser selected with
-`--browser` (Chrome by default). Fetch imports that existing browser session;
-it does not ask for or store your Instagram password.
+### Instagram login (`yuno auth`)
+
+Instagram login is still imported from cookies in an already-logged-in
+browser -- there's no practical way around that. First log in to
+`instagram.com` in the browser you plan to use, then run `yuno auth login`.
+It never asks for or stores your Instagram password.
+
+Unlike the old `fetch --browser` flag, login is no longer silent: cookie
+import can only ever see whichever account is currently active in the
+browser, so `auth login` shows you the detected username and asks for
+confirmation before saving it -- the closest thing to an account picker that
+cookie-based auth allows.
+
+Saved sessions are kept on disk (like `gh auth`), so `fetch` doesn't need
+the browser on every run, and you can juggle multiple Instagram accounts:
+
+```bash
+yuno auth login              # log in as account A, saved and made active
+yuno auth login              # (after switching accounts in the browser) log in as account B; B becomes active
+yuno auth status              #   * account-b
+                               #     account-a
+yuno auth switch account-a    # make A active again, no browser needed
+yuno fetch                    # runs against whichever account is active
+```
 
 ## cron setup (macOS/Linux)
 
@@ -131,11 +160,18 @@ Using the defaults, the layout looks like this:
 └── logs/
 
 ~/.config/yunoballizer/
-├── instagram/accounts.txt
+├── instagram/
+│   ├── accounts.txt
+│   ├── active_session       # username of the session `fetch` currently uses
+│   └── sessions/            # one file per `yuno auth login`, named <username>.session
 ├── youtube/accounts.txt
 ├── tiktok/accounts.txt
 └── urls.txt
 ```
+
+Session files hold cookies imported from the browser, not your password --
+delete `instagram/sessions/` (or run `yuno auth logout`) at any time to
+revoke them locally; that doesn't affect the browser or Instagram itself.
 
 **`sources/`** is the source of truth. Every downloaded post is a single
 self-contained directory holding its media, caption, and metadata together --

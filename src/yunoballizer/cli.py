@@ -80,7 +80,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     switch_parser = auth_sub.add_parser("switch", help="Switch the active Instagram session")
-    switch_parser.add_argument("username", help="Instagram username of a previously saved session")
+    switch_parser.add_argument(
+        "username", nargs="?", default=None,
+        help="Instagram username of a previously saved session (default: cycle to the next saved session)",
+    )
 
     logout_parser = auth_sub.add_parser(
         "logout", help="Remove a saved Instagram session (defaults to the active one)"

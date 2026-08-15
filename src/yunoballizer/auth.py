@@ -296,13 +296,31 @@ def status(check: bool = False) -> None:
             print(f"  {marker} {username}")
 
 
-def switch(username: str) -> None:
-    """Switch the active session to a previously saved one."""
-    if username not in saved_usernames():
+def switch(username: str | None = None) -> None:
+    """Switch the active session to a previously saved one.
+
+    With no username, cycles to the next saved session (alphabetically
+    after the current one, wrapping around) -- similar to `gh auth switch`.
+    """
+    usernames = saved_usernames()
+    if not usernames:
+        raise SystemExit("No saved Instagram sessions. Run `yuno auth login` first.")
+
+    if username is None:
+        if len(usernames) == 1:
+            raise SystemExit(
+                f"Only one saved session (@{usernames[0]}) -- nothing to switch to. "
+                "Run `yuno auth login` to add another."
+            )
+        current = active_username()
+        index = (usernames.index(current) + 1) % len(usernames) if current in usernames else 0
+        username = usernames[index]
+    elif username not in usernames:
         raise SystemExit(
             f"No saved session for @{username}. Run `yuno auth login` first, "
             "or check `yuno auth status` for saved usernames."
         )
+
     _set_active(username)
     print(f"Switched active Instagram session to @{username}.")
 

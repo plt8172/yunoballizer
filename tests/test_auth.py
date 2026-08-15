@@ -451,6 +451,37 @@ class AuthSessionTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             auth.switch("nobody")
 
+    def test_switch_with_no_argument_cycles_to_next_session(self) -> None:
+        self._login_as("alice")
+        self._login_as("bob")
+        self._login_as("carol")
+        auth.switch("alice")  # sorted order: alice, bob, carol -- currently alice
+
+        auth.switch()
+
+        self.assertEqual(auth.active_username(), "bob")
+
+    def test_switch_with_no_argument_wraps_around(self) -> None:
+        self._login_as("alice")
+        self._login_as("bob")
+        auth.switch("bob")  # last in sorted order
+
+        auth.switch()
+
+        self.assertEqual(auth.active_username(), "alice")
+
+    def test_switch_with_no_argument_and_only_one_session_raises(self) -> None:
+        self._login_as("alice")
+
+        with self.assertRaises(SystemExit):
+            auth.switch()
+
+        self.assertEqual(auth.active_username(), "alice")
+
+    def test_switch_with_no_argument_and_no_sessions_raises(self) -> None:
+        with self.assertRaises(SystemExit):
+            auth.switch()
+
     def test_logout_removes_active_session(self) -> None:
         self._login_as("alice")
 

@@ -77,6 +77,7 @@ yuno auth login -y            # Skip the confirmation prompt (e.g. for scripted 
 yuno auth status              # List saved sessions, marking the active one with *
 yuno auth status -c           # Also verify each saved session is still logged in (slower: one request per session)
 yuno auth switch <user>       # Switch which saved session `fetch` uses, without touching the browser
+yuno auth switch              # No user given: cycle to the next saved session (like `gh auth switch`)
 yuno auth logout [<user>]     # Remove a saved session (defaults to the active one)
 ```
 

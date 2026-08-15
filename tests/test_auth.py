@@ -503,6 +503,42 @@ class AuthSessionTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             auth.logout()
 
+    def test_logout_multiple_usernames_removes_all(self) -> None:
+        self._login_as("alice")
+        self._login_as("bob")
+        self._login_as("carol")
+
+        auth.logout(["alice", "bob"])
+
+        self.assertEqual(auth.saved_usernames(), ["carol"])
+        self.assertEqual(auth.active_username(), "carol")
+
+    def test_logout_multiple_usernames_clears_active_when_included(self) -> None:
+        self._login_as("alice")
+        self._login_as("bob")
+
+        auth.logout(["alice", "bob"])
+
+        self.assertEqual(auth.saved_usernames(), [])
+        self.assertIsNone(auth.active_username())
+
+    def test_logout_multiple_usernames_dedupes(self) -> None:
+        self._login_as("alice")
+        self._login_as("bob")
+
+        auth.logout(["alice", "alice"])
+
+        self.assertEqual(auth.saved_usernames(), ["bob"])
+
+    def test_logout_multiple_usernames_with_unknown_raises_and_removes_nothing(self) -> None:
+        self._login_as("alice")
+        self._login_as("bob")
+
+        with self.assertRaises(SystemExit):
+            auth.logout(["alice", "nobody"])
+
+        self.assertEqual(auth.saved_usernames(), ["alice", "bob"])
+
     def test_get_loader_with_no_active_session_raises(self) -> None:
         with self.assertRaises(SystemExit):
             auth.get_loader()

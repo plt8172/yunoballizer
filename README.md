@@ -78,7 +78,7 @@ yuno auth status              # List saved sessions, marking the active one with
 yuno auth status -c           # Also verify each saved session is still logged in (slower: one request per session)
 yuno auth switch <user>       # Switch which saved session `fetch` uses, without touching the browser
 yuno auth switch              # No user given: cycle to the next saved session (like `gh auth switch`)
-yuno auth logout [<user>]     # Remove a saved session (defaults to the active one)
+yuno auth logout [<user>...]  # Remove one or more saved sessions (defaults to just the active one)
 ```
 
 `-s`/`--skip` and `-l`/`--limit` mean the same thing across all three

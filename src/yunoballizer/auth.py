@@ -325,20 +325,33 @@ def switch(username: str | None = None) -> None:
     print(f"Switched active Instagram session to @{username}.")
 
 
-def logout(username: str | None = None) -> None:
-    """Remove a saved session, defaulting to the active one."""
-    target = username or active_username()
-    if not target:
-        raise SystemExit("No active session to remove. Pass a username, or check `yuno auth status`.")
+def logout(usernames: str | list[str] | None = None) -> None:
+    """Remove one or more saved sessions, defaulting to just the active one."""
+    if isinstance(usernames, str):
+        usernames = [usernames]
 
-    session_file = _session_file(target)
-    if not session_file.exists():
-        raise SystemExit(f"No saved session for @{target}.")
+    if not usernames:
+        active = active_username()
+        if not active:
+            raise SystemExit("No active session to remove. Pass a username, or check `yuno auth status`.")
+        usernames = [active]
+    else:
+        usernames = list(dict.fromkeys(usernames))  # de-dupe, preserve order
 
-    session_file.unlink()
-    if active_username() == target:
+    missing = [u for u in usernames if u not in saved_usernames()]
+    if missing:
+        raise SystemExit(
+            f"No saved session for: {', '.join('@' + u for u in missing)}. "
+            "Check `yuno auth status` for saved usernames."
+        )
+
+    active = active_username()
+    for username in usernames:
+        _session_file(username).unlink()
+        print(f"Removed saved Instagram session for @{username}.")
+
+    if active in usernames:
         _active_file().unlink(missing_ok=True)
-    print(f"Removed saved Instagram session for @{target}.")
 
 
 def _load_session(username: str) -> Any:

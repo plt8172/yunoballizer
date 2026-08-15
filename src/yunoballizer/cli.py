@@ -86,11 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     logout_parser = auth_sub.add_parser(
-        "logout", help="Remove a saved Instagram session (defaults to the active one)"
+        "logout", help="Remove one or more saved Instagram sessions (defaults to the active one)"
     )
     logout_parser.add_argument(
-        "username", nargs="?", default=None,
-        help="Instagram username to remove (default: the active session)",
+        "username", nargs="*",
+        help="Instagram username(s) to remove (default: just the active session)",
     )
 
     sub.add_parser("expand", help="No login required. Expands Instagram accounts.txt from downloaded caption mentions")

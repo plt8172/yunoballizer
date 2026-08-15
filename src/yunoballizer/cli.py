@@ -61,7 +61,14 @@ def build_parser() -> argparse.ArgumentParser:
     login_parser.add_argument(
         "-b", "--browser", default=auth.DEFAULT_BROWSER,
         help=f"Browser to import the Instagram login session's cookies from (default: {auth.DEFAULT_BROWSER}). "
-             "Avoids Instagram's automated-login checkpoint by reusing an already-logged-in session.",
+             "Avoids Instagram's automated-login checkpoint by reusing an already-logged-in session. "
+             "Ignored with --interactive.",
+    )
+    login_parser.add_argument(
+        "-i", "--interactive", action="store_true",
+        help="Open a dedicated browser window to log in fresh, instead of importing the session "
+             "already active in --browser. Lets you add another account without switching accounts "
+             "in your everyday browser. Requires the 'playwright' extra.",
     )
 
     auth_sub.add_parser("status", help="List saved Instagram sessions and show which one is active")
@@ -138,7 +145,7 @@ def main(argv: list[str] | None = None) -> None:
         fetch.run()
     elif args.command == "auth":
         if args.auth_command == "login":
-            auth.login(browser=args.browser)
+            auth.login(browser=args.browser, interactive=args.interactive)
         elif args.auth_command == "status":
             auth.status()
         elif args.auth_command == "switch":

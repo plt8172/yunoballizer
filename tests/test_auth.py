@@ -60,6 +60,136 @@ class ImportFromBrowserTests(unittest.TestCase):
                 auth._import_from_browser("nonexistent-browser")
 
 
+class CookiejarFromPlaywrightCookiesTests(unittest.TestCase):
+    def test_converts_cookie_fields(self) -> None:
+        jar = auth._cookiejar_from_playwright_cookies(
+            [
+                {
+                    "name": "sessionid",
+                    "value": "abc123",
+                    "domain": ".instagram.com",
+                    "path": "/",
+                    "secure": True,
+                    "httpOnly": True,
+                    "expires": -1,
+                }
+            ]
+        )
+        cookies = list(jar)
+        self.assertEqual(len(cookies), 1)
+        cookie = cookies[0]
+        self.assertEqual(cookie.name, "sessionid")
+        self.assertEqual(cookie.value, "abc123")
+        self.assertEqual(cookie.domain, ".instagram.com")
+        self.assertTrue(cookie.secure)
+        self.assertIsNone(cookie.expires)
+
+
+class _FakePage:
+    def __init__(self, cookies_sequence: list[list[dict]]) -> None:
+        self._cookies_sequence = cookies_sequence
+        self._index = 0
+        self.goto_calls: list[str] = []
+        self.wait_calls: list[int] = []
+        self.context = SimpleNamespace(cookies=self._cookies)
+
+    def goto(self, url: str) -> None:
+        self.goto_calls.append(url)
+
+    def _cookies(self) -> list[dict]:
+        if self._index < len(self._cookies_sequence):
+            result = self._cookies_sequence[self._index]
+            self._index += 1
+        else:
+            result = self._cookies_sequence[-1]
+        return result
+
+    def wait_for_timeout(self, ms: int) -> None:
+        self.wait_calls.append(ms)
+
+
+class _FakeBrowser:
+    def __init__(self, page: _FakePage) -> None:
+        self._page = page
+        self.closed = False
+
+    def new_page(self) -> _FakePage:
+        return self._page
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _fake_sync_playwright_module(page: _FakePage, browser: _FakeBrowser) -> SimpleNamespace:
+    chromium = SimpleNamespace(launch=lambda headless=False: browser)
+    playwright = SimpleNamespace(chromium=chromium)
+
+    class _Cm:
+        def __enter__(self):
+            return playwright
+
+        def __exit__(self, *args):
+            return False
+
+    return SimpleNamespace(sync_playwright=lambda: _Cm())
+
+
+class InteractiveBrowserLoginTests(unittest.TestCase):
+    def test_returns_loader_once_sessionid_cookie_appears(self) -> None:
+        session_cookie = {
+            "name": "sessionid", "value": "abc123", "domain": ".instagram.com",
+            "path": "/", "secure": True, "httpOnly": True, "expires": -1,
+        }
+        page = _FakePage(cookies_sequence=[[], [session_cookie]])
+        browser = _FakeBrowser(page)
+        sync_api = _fake_sync_playwright_module(page, browser)
+
+        context = SimpleNamespace(username=None)
+        captured_jar = {}
+        context.update_cookies = lambda jar: captured_jar.__setitem__("jar", jar)
+        loader = SimpleNamespace(context=context, test_login=lambda: "carol")
+        instaloader = SimpleNamespace(Instaloader=lambda **kwargs: loader)
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "playwright": SimpleNamespace(),
+                "playwright.sync_api": sync_api,
+                "instaloader": instaloader,
+            },
+        ):
+            result = auth._interactive_browser_login()
+
+        self.assertIs(result, loader)
+        self.assertEqual(context.username, "carol")
+        self.assertTrue(browser.closed)
+        self.assertIn("sessionid", [c.name for c in captured_jar["jar"]])
+
+    def test_times_out_when_no_login_happens(self) -> None:
+        page = _FakePage(cookies_sequence=[[]])
+        browser = _FakeBrowser(page)
+        sync_api = _fake_sync_playwright_module(page, browser)
+        instaloader = SimpleNamespace(Instaloader=lambda **kwargs: self.fail("should not be reached"))
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "playwright": SimpleNamespace(),
+                "playwright.sync_api": sync_api,
+                "instaloader": instaloader,
+            },
+        ):
+            with self.assertRaises(SystemExit):
+                auth._interactive_browser_login(timeout_seconds=0)
+
+        self.assertTrue(browser.closed)
+
+    def test_missing_playwright_raises_helpful_error(self) -> None:
+        with patch.dict("sys.modules", {"playwright.sync_api": None, "playwright": None}):
+            with self.assertRaises(SystemExit):
+                auth._interactive_browser_login()
+
+
 class AuthSessionTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -101,6 +231,19 @@ class AuthSessionTests(unittest.TestCase):
 
         self.assertEqual(auth.saved_usernames(), [])
         self.assertIsNone(auth.active_username())
+
+    def test_login_interactive_uses_login_window_instead_of_browser_cookies(self) -> None:
+        loader = self._fake_loader("carol")
+        with (
+            patch.object(auth, "_interactive_browser_login", return_value=loader) as mock_interactive,
+            patch.object(auth, "_import_from_browser") as mock_cookie_import,
+        ):
+            username = auth.login(interactive=True, confirm=lambda prompt: "y")
+
+        mock_interactive.assert_called_once()
+        mock_cookie_import.assert_not_called()
+        self.assertEqual(username, "carol")
+        self.assertEqual(auth.active_username(), "carol")
 
     def test_second_login_adds_session_without_switching_active(self) -> None:
         with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("alice")):

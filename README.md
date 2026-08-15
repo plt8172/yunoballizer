@@ -42,6 +42,14 @@ pip install -e ".[curate]"
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+To use `yuno auth login --interactive` (a dedicated login window instead of
+importing cookies from your everyday browser):
+
+```bash
+pip install -e ".[interactive]"
+playwright install chromium
+```
+
 ## First-time setup
 
 ```bash
@@ -70,11 +78,12 @@ yuno profile              # Build/refresh a content profile from downloaded Inst
 yuno curate               # Curate downloaded posts against the content profile
 yuno all                  # download + curate (cron entry point)
 
-yuno auth login           # Import the Instagram session from a logged-in browser (Chrome by default) and save it
-yuno auth login -b firefox  # Same, importing from a different browser
-yuno auth status          # List saved sessions, marking the active one with *
-yuno auth switch <user>   # Switch which saved session `fetch` uses, without touching the browser
-yuno auth logout [<user>] # Remove a saved session (defaults to the active one)
+yuno auth login              # Import the Instagram session from a logged-in browser (Chrome by default) and save it
+yuno auth login -b firefox   # Same, importing from a different browser
+yuno auth login -i           # Open a dedicated login window instead (requires the `interactive` extra, see Install)
+yuno auth status             # List saved sessions, marking the active one with *
+yuno auth switch <user>      # Switch which saved session `fetch` uses, without touching the browser
+yuno auth logout [<user>]    # Remove a saved session (defaults to the active one)
 ```
 
 `-s`/`--skip` and `-l`/`--limit` mean the same thing across all three
@@ -82,27 +91,36 @@ platforms: skip the N most recent posts per account, then harvest the next L.
 
 ### Instagram login (`yuno auth`)
 
-Instagram login is still imported from cookies in an already-logged-in
-browser -- there's no practical way around that. First log in to
-`instagram.com` in the browser you plan to use, then run `yuno auth login`.
-It never asks for or stores your Instagram password.
+Instagram login is still cookie-based -- there's no practical way around
+that. `yuno auth login` gets those cookies one of two ways:
 
-Unlike the old `fetch --browser` flag, login is no longer silent: cookie
-import can only ever see whichever account is currently active in the
-browser, so `auth login` shows you the detected username and asks for
-confirmation before saving it -- the closest thing to an account picker that
-cookie-based auth allows.
+- **Default:** imports the session already active in a browser you name
+  with `-b`/`--browser` (Chrome by default). Requires first logging in to
+  `instagram.com` there yourself.
+- **`-i`/`--interactive`:** opens a separate, disposable browser window and
+  waits for you to log in inside it. This is the better way to add another
+  account -- it doesn't touch your everyday browser's session at all, so you
+  never have to log it out of one account to log in as another.
+
+Either way, it never asks for or stores your Instagram password -- only
+the session cookies Instagram itself issues after you log in.
+
+Login is not silent: cookie import can only ever see one account at a time
+(the one currently active in the browser, or the one you just logged into
+in the login window), so `auth login` always shows you the detected
+username and asks for confirmation before saving it -- the closest thing to
+an account picker that cookie-based auth allows.
 
 Saved sessions are kept on disk (like `gh auth`), so `fetch` doesn't need
 the browser on every run, and you can juggle multiple Instagram accounts:
 
 ```bash
-yuno auth login              # log in as account A, saved and made active
-yuno auth login              # (after switching accounts in the browser) log in as account B; B becomes active
-yuno auth status              #   * account-b
-                               #     account-a
-yuno auth switch account-a    # make A active again, no browser needed
-yuno fetch                    # runs against whichever account is active
+yuno auth login -i            # log in as account A in the login window; saved and made active
+yuno auth login -i            # log in as account B in a fresh login window; B becomes active
+yuno auth status               #   * account-b
+                                #     account-a
+yuno auth switch account-a     # make A active again, no browser needed
+yuno fetch                     # runs against whichever account is active
 ```
 
 ## cron setup (macOS/Linux)

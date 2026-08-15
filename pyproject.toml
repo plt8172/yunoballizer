@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 curate = ["anthropic>=0.25.0"]
+interactive = ["playwright>=1.40"]
 
 [project.scripts]
 yunoballizer = "yunoballizer.cli:main"

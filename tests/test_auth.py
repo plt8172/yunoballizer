@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import stat
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -245,6 +246,31 @@ class AuthSessionTests(unittest.TestCase):
         self.assertEqual(username, "carol")
         self.assertEqual(auth.active_username(), "carol")
 
+    def test_login_assume_yes_skips_confirmation(self) -> None:
+        loader = self._fake_loader("alice")
+
+        def confirm_should_not_be_called(prompt: str) -> str:
+            self.fail("confirm() should not be called when assume_yes=True")
+
+        with patch.object(auth, "_import_from_browser", return_value=loader):
+            username = auth.login(browser="chrome", assume_yes=True, confirm=confirm_should_not_be_called)
+
+        self.assertEqual(username, "alice")
+        self.assertEqual(auth.active_username(), "alice")
+
+    def test_login_sets_restrictive_permissions(self) -> None:
+        loader = self._fake_loader("alice")
+        with patch.object(auth, "_import_from_browser", return_value=loader):
+            auth.login(browser="chrome", confirm=lambda prompt: "y")
+
+        session_mode = stat.S_IMODE(auth._session_file("alice").stat().st_mode)
+        dir_mode = stat.S_IMODE(auth._sessions_dir().stat().st_mode)
+        active_mode = stat.S_IMODE(auth._active_file().stat().st_mode)
+
+        self.assertEqual(session_mode, 0o600)
+        self.assertEqual(dir_mode, 0o700)
+        self.assertEqual(active_mode, 0o600)
+
     def test_second_login_adds_session_without_switching_active(self) -> None:
         with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("alice")):
             auth.login(browser="chrome", confirm=lambda prompt: "y")
@@ -267,6 +293,29 @@ class AuthSessionTests(unittest.TestCase):
         output = out.getvalue()
         self.assertIn("* bob", output)
         self.assertIn("  alice", output)
+
+    def test_status_check_flags_expired_sessions(self) -> None:
+        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("alice")):
+            auth.login(browser="chrome", confirm=lambda prompt: "y")
+        with patch.object(auth, "_import_from_browser", return_value=self._fake_loader("bob")):
+            auth.login(browser="chrome", confirm=lambda prompt: "y")
+
+        def load_session_from_file(username: str, path: str) -> None:
+            if username == "bob":
+                raise Exception("session expired")
+
+        instaloader = SimpleNamespace(
+            Instaloader=lambda **kwargs: SimpleNamespace(load_session_from_file=load_session_from_file)
+        )
+
+        out = io.StringIO()
+        with patch.dict("sys.modules", {"instaloader": instaloader}), redirect_stdout(out):
+            auth.status(check=True)
+
+        output = out.getvalue()
+        self.assertIn("alice [ok]", output)
+        self.assertIn("bob [EXPIRED", output)
+        self.assertIn("session expired", output)
 
     def test_status_with_no_sessions(self) -> None:
         out = io.StringIO()

@@ -70,8 +70,18 @@ def build_parser() -> argparse.ArgumentParser:
              "already active in --browser. Lets you add another account without switching accounts "
              "in your everyday browser. Requires the 'playwright' extra.",
     )
+    login_parser.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip the confirmation prompt and save the detected session immediately",
+    )
 
-    auth_sub.add_parser("status", help="List saved Instagram sessions and show which one is active")
+    status_parser = auth_sub.add_parser(
+        "status", help="List saved Instagram sessions and show which one is active"
+    )
+    status_parser.add_argument(
+        "-c", "--check", action="store_true",
+        help="Verify each saved session is still logged in (slower: one request per session)",
+    )
 
     switch_parser = auth_sub.add_parser("switch", help="Switch the active Instagram session")
     switch_parser.add_argument("username", help="Instagram username of a previously saved session")
@@ -145,9 +155,9 @@ def main(argv: list[str] | None = None) -> None:
         fetch.run()
     elif args.command == "auth":
         if args.auth_command == "login":
-            auth.login(browser=args.browser, interactive=args.interactive)
+            auth.login(browser=args.browser, interactive=args.interactive, assume_yes=args.yes)
         elif args.auth_command == "status":
-            auth.status()
+            auth.status(check=args.check)
         elif args.auth_command == "switch":
             auth.switch(args.username)
         elif args.auth_command == "logout":

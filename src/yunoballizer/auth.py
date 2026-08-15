@@ -68,6 +68,7 @@ def _set_active(username: str) -> None:
     active_file = _active_file()
     active_file.parent.mkdir(parents=True, exist_ok=True)
     active_file.write_text(username + "\n", encoding="utf-8")
+    active_file.chmod(0o600)
 
 
 def _import_from_browser(browser: str) -> Any:
@@ -182,6 +183,7 @@ def _interactive_browser_login(timeout_seconds: int = INTERACTIVE_LOGIN_TIMEOUT_
 def login(
     browser: str = DEFAULT_BROWSER,
     interactive: bool = False,
+    assume_yes: bool = False,
     confirm: Callable[[str], str] = input,
 ) -> str:
     """Obtain a session (from the everyday browser, or an interactive login window), confirm it, and save it.
@@ -190,7 +192,8 @@ def login(
     it only ever sees whichever session is currently active. Asking for
     confirmation here is the closest we can get to a real account picker:
     it stops fetch from silently running as the wrong account just because
-    that's what happened to be logged in.
+    that's what happened to be logged in. Pass assume_yes to skip that
+    prompt (e.g. for scripted use).
     """
     if interactive:
         loader = _interactive_browser_login()
@@ -200,23 +203,41 @@ def login(
         source = browser
     username = loader.context.username
 
-    verb = "Re-import" if username in saved_usernames() else "Save"
-    answer = confirm(
-        f"Detected Instagram session for @{username} in {source}. {verb} and use it? [Y/n] "
-    ).strip().lower()
-    if answer not in ("", "y", "yes"):
-        raise SystemExit("Cancelled.")
+    if not assume_yes:
+        verb = "Re-import" if username in saved_usernames() else "Save"
+        answer = confirm(
+            f"Detected Instagram session for @{username} in {source}. {verb} and use it? [Y/n] "
+        ).strip().lower()
+        if answer not in ("", "y", "yes"):
+            raise SystemExit("Cancelled.")
 
     sessions_dir = _sessions_dir()
     sessions_dir.mkdir(parents=True, exist_ok=True)
-    loader.save_session_to_file(str(_session_file(username)))
+    sessions_dir.chmod(0o700)
+    session_file = _session_file(username)
+    loader.save_session_to_file(str(session_file))
+    session_file.chmod(0o600)
     _set_active(username)
     logger.info("Saved Instagram session for @%s", username)
     return username
 
 
-def status() -> None:
-    """Print saved sessions and mark which one is active."""
+def _check_session(username: str) -> tuple[bool, str]:
+    """Try loading a saved session, without raising. Returns (is_valid, detail)."""
+    try:
+        _load_session(username)
+    except SystemExit as exc:
+        return False, str(exc)
+    return True, ""
+
+
+def status(check: bool = False) -> None:
+    """Print saved sessions and mark which one is active.
+
+    With check=True, also loads each saved session to verify it's still
+    logged in -- slower (one request per session) but catches sessions
+    Instagram has since expired or revoked, before `fetch` hits them.
+    """
     usernames = saved_usernames()
     if not usernames:
         print("No saved Instagram sessions. Run `yuno auth login` to add one.")
@@ -226,7 +247,12 @@ def status() -> None:
     print("Saved Instagram sessions:")
     for username in usernames:
         marker = "*" if username == active else " "
-        print(f"  {marker} {username}")
+        if check:
+            valid, detail = _check_session(username)
+            state = "ok" if valid else f"EXPIRED: {detail}"
+            print(f"  {marker} {username} [{state}]")
+        else:
+            print(f"  {marker} {username}")
 
 
 def switch(username: str) -> None:
@@ -256,21 +282,14 @@ def logout(username: str | None = None) -> None:
     print(f"Removed saved Instagram session for @{target}.")
 
 
-def get_loader() -> Any:
-    """Load the active saved session, for use by commands like fetch."""
+def _load_session(username: str) -> Any:
+    """Load a specific saved session from disk. Raises SystemExit if unavailable or expired."""
     try:
         import instaloader
     except ImportError as exc:
         raise SystemExit(
             "Instagram auth dependencies are missing. Reinstall yunoballizer."
         ) from exc
-
-    username = active_username()
-    if not username:
-        raise SystemExit(
-            "No active Instagram session. Run `yuno auth login` first, "
-            "then `yuno auth status` to confirm it's active."
-        )
 
     session_file = _session_file(username)
     if not session_file.exists():
@@ -284,5 +303,18 @@ def get_loader() -> Any:
     except Exception as exc:
         raise SystemExit(f"Could not load the saved Instagram session for @{username}: {exc}") from exc
 
+    return loader
+
+
+def get_loader() -> Any:
+    """Load the active saved session, for use by commands like fetch."""
+    username = active_username()
+    if not username:
+        raise SystemExit(
+            "No active Instagram session. Run `yuno auth login` first, "
+            "then `yuno auth status` to confirm it's active."
+        )
+
+    loader = _load_session(username)
     logger.info("Using Instagram session for @%s", username)
     return loader

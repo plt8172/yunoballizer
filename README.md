@@ -81,7 +81,9 @@ yuno all                  # download + curate (cron entry point)
 yuno auth login              # Import the Instagram session from a logged-in browser (Chrome by default) and save it
 yuno auth login -b firefox   # Same, importing from a different browser
 yuno auth login -i           # Open a dedicated login window instead (requires the `interactive` extra, see Install)
+yuno auth login -y           # Skip the confirmation prompt (e.g. for scripted use)
 yuno auth status             # List saved sessions, marking the active one with *
+yuno auth status -c          # Also verify each saved session is still logged in (slower: one request per session)
 yuno auth switch <user>      # Switch which saved session `fetch` uses, without touching the browser
 yuno auth logout [<user>]    # Remove a saved session (defaults to the active one)
 ```
@@ -109,10 +111,21 @@ Login is not silent: cookie import can only ever see one account at a time
 (the one currently active in the browser, or the one you just logged into
 in the login window), so `auth login` always shows you the detected
 username and asks for confirmation before saving it -- the closest thing to
-an account picker that cookie-based auth allows.
+an account picker that cookie-based auth allows. Pass `-y`/`--yes` to skip
+that prompt.
 
-Saved sessions are kept on disk (like `gh auth`), so `fetch` doesn't need
-the browser on every run, and you can juggle multiple Instagram accounts:
+Saved sessions are kept on disk (like `gh auth`) as cookie data, functionally
+equivalent to a logged-in session for that account -- `auth login` writes
+each session file (and the sessions directory, and the active-session
+marker) with `0600`/`0700` permissions so only your user account can read
+them. Deleting `instagram/sessions/` (or running `yuno auth logout`) revokes
+them locally at any time; it doesn't affect the browser or Instagram itself.
+Since Instagram can expire or revoke a session independently of anything
+this tool does, run `yuno auth status -c` occasionally to check whether a
+saved session still works before `fetch` runs into it.
+
+`fetch` doesn't need the browser on every run, and you can juggle multiple
+Instagram accounts:
 
 ```bash
 yuno auth login -i            # log in as account A in the login window; saved and made active
@@ -187,9 +200,9 @@ Using the defaults, the layout looks like this:
 └── urls.txt
 ```
 
-Session files hold cookies imported from the browser, not your password --
-delete `instagram/sessions/` (or run `yuno auth logout`) at any time to
-revoke them locally; that doesn't affect the browser or Instagram itself.
+Session files hold cookies, not your password, and are written `0600`
+(the containing `sessions/` directory `0700`) -- see [Instagram
+login](#instagram-login-yuno-auth) above for details.
 
 **`sources/`** is the source of truth. Every downloaded post is a single
 self-contained directory holding its media, caption, and metadata together --

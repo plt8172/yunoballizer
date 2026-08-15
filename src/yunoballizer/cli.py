@@ -4,12 +4,14 @@ from __future__ import annotations
 import argparse
 import base64
 import logging
+import shlex
 import sys
 import zlib
 
 from . import config, expand, fetch, prune, storage
 from . import profile as profile_mod
 from . import curate as curate_mod
+from . import select as select_mod
 from .downloaders import instagram, tiktok, youtube
 from .downloaders import urls as urls_mod
 
@@ -56,6 +58,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("expand", help="No login required. Expands Instagram accounts.txt from downloaded caption mentions")
     sub.add_parser("profile", help="Build/refresh the content profile from downloaded Instagram captions")
     sub.add_parser("curate", help="Curate new posts against the content profile")
+
+    select_parser = sub.add_parser(
+        "select", help="Mark favorites in review/ with an external image viewer (default: nsxiv)"
+    )
+    select_parser.add_argument(
+        "--viewer", default=None,
+        help="Override the viewer command as a single quoted string, e.g. \"sxiv -o -t\" "
+             "(default: \"nsxiv -o -t\"). Must print marked file paths to stdout on exit.",
+    )
+    sub.add_parser("export", help="Copy/hardlink selected media into selected/")
+
     sub.add_parser("all", help="Run download then curate (cron entry point)")
 
     prune_parser = sub.add_parser(
@@ -125,6 +138,10 @@ def main(argv: list[str] | None = None) -> None:
         profile_mod.build()
     elif args.command == "curate":
         curate_mod.run()
+    elif args.command == "select":
+        select_mod.run_select(viewer=shlex.split(args.viewer) if args.viewer else None)
+    elif args.command == "export":
+        select_mod.run_export()
     elif args.command == "all":
         _run_download()
         if (config.DERIVED_DIR / profile_mod.PROFILE_FILENAME).exists():

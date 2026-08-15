@@ -66,6 +66,9 @@ yuno fetch                # Login required. Adds saved-post authors to Instagram
 yuno expand               # No login required. Adds @mentions from downloaded Instagram captions
 yuno profile              # Build/refresh a content profile from downloaded Instagram captions
 yuno curate               # Curate downloaded posts against the content profile
+yuno select                # Mark favorites in review/ with an image viewer (default: nsxiv)
+yuno select --viewer "sxiv -o -t"  # Use a different viewer command
+yuno export                # Copy/hardlink everything you've selected into selected/
 yuno all                  # download + curate (cron entry point)
 ```
 
@@ -122,12 +125,14 @@ Using the defaults, the layout looks like this:
 │   └── other/<extractor>/<uploader>/<post-id>/
 ├── review/               # flat symlinks into sources/, for browsing
 ├── curated/              # copies of posts `yuno curate` decided to keep
+├── selected/             # real files (hardlinked/copied) for posts you picked with `yuno select`
 └── derived/
     └── taste_profile.json
 
 ~/.local/state/yunoballizer/
 ├── archives/             # yt-dlp download-archive files (dedup)
 ├── curation_log.json
+├── selection_log.json
 └── logs/
 
 ~/.config/yunoballizer/
@@ -154,9 +159,25 @@ filename, is the source of truth; nothing parses link names back into
 metadata. Deleting a link never touches the original file, and deleting
 `review/` entirely is safe -- `yuno download` regenerates it from `sources/`
 every run. Profile pictures are never downloaded in the first place, so they
-never show up here either. There's no selected/rejected/pending split; if you
-want a curated subset, use `yuno curate`, which copies posts it keeps into
-`curated/`.
+never show up here either. If you want an automatically curated subset, use
+`yuno curate`, which copies posts it keeps into `curated/`.
+
+**`yuno select`** is for manually picking favorites instead of relying on
+automatic curation. It launches an external image viewer's mark mode (nsxiv
+by default -- `-o -t` for thumbnail-grid mode that prints marked files to
+stdout on quit) over `review/`, then records whatever you marked into
+`selection_log.json` as a plain manifest. review/'s symlinks are still just a
+disposable browsing index, so selection state deliberately lives outside the
+filesystem instead of being encoded via symlinks -- nothing about marking a
+file changes `review/` or `sources/`. Run `yuno export` afterwards to
+materialize the manifest into `selected/`: real files (hardlinked when
+`selected/` shares a filesystem with `sources/`, copied otherwise), not
+symlinks, so `selected/` works with any downstream tool, sync client, or
+mobile app without special-casing links. `nsxiv` is an optional runtime
+dependency invoked as a subprocess -- install it separately (`nsxiv` is
+GPL-2, but yunoballizer only shells out to it rather than linking against
+it, so that doesn't affect this project's own license), or point `--viewer`
+at any command that prints marked file paths to stdout on exit.
 
 ## Uninstalling
 

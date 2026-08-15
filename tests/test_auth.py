@@ -121,8 +121,20 @@ class _FakeBrowser:
         self.closed = True
 
 
-def _fake_sync_playwright_module(page: _FakePage, browser: _FakeBrowser) -> SimpleNamespace:
-    chromium = SimpleNamespace(launch=lambda headless=False: browser)
+def _fake_sync_playwright_module(
+    page: _FakePage,
+    browser: _FakeBrowser,
+    launch_calls: list[dict] | None = None,
+    launch_error: Exception | None = None,
+) -> SimpleNamespace:
+    def launch(**kwargs):
+        if launch_calls is not None:
+            launch_calls.append(kwargs)
+        if launch_error is not None:
+            raise launch_error
+        return browser
+
+    chromium = SimpleNamespace(launch=launch)
     playwright = SimpleNamespace(chromium=chromium)
 
     class _Cm:
@@ -189,6 +201,90 @@ class InteractiveBrowserLoginTests(unittest.TestCase):
         with patch.dict("sys.modules", {"playwright.sync_api": None, "playwright": None}):
             with self.assertRaises(SystemExit):
                 auth._interactive_browser_login()
+
+    def _login_ready_fixtures(self):
+        session_cookie = {
+            "name": "sessionid", "value": "abc123", "domain": ".instagram.com",
+            "path": "/", "secure": True, "httpOnly": True, "expires": -1,
+        }
+        page = _FakePage(cookies_sequence=[[session_cookie]])
+        browser = _FakeBrowser(page)
+        instaloader = SimpleNamespace(
+            Instaloader=lambda **kwargs: SimpleNamespace(
+                context=SimpleNamespace(username=None, update_cookies=lambda jar: None),
+                test_login=lambda: "carol",
+            )
+        )
+        return page, browser, instaloader
+
+    def test_default_browser_drives_installed_chrome_via_channel(self) -> None:
+        page, browser, instaloader = self._login_ready_fixtures()
+        launch_calls: list[dict] = []
+        sync_api = _fake_sync_playwright_module(page, browser, launch_calls=launch_calls)
+
+        with patch.dict(
+            "sys.modules",
+            {"playwright": SimpleNamespace(), "playwright.sync_api": sync_api, "instaloader": instaloader},
+        ):
+            auth._interactive_browser_login()
+
+        self.assertEqual(launch_calls, [{"headless": False, "channel": "chrome"}])
+
+    def test_edge_maps_to_msedge_channel(self) -> None:
+        page, browser, instaloader = self._login_ready_fixtures()
+        launch_calls: list[dict] = []
+        sync_api = _fake_sync_playwright_module(page, browser, launch_calls=launch_calls)
+
+        with patch.dict(
+            "sys.modules",
+            {"playwright": SimpleNamespace(), "playwright.sync_api": sync_api, "instaloader": instaloader},
+        ):
+            auth._interactive_browser_login(browser="edge")
+
+        self.assertEqual(launch_calls, [{"headless": False, "channel": "msedge"}])
+
+    def test_unrecognized_browser_falls_back_to_bundled_chromium(self) -> None:
+        page, browser, instaloader = self._login_ready_fixtures()
+        launch_calls: list[dict] = []
+        sync_api = _fake_sync_playwright_module(page, browser, launch_calls=launch_calls)
+
+        with patch.dict(
+            "sys.modules",
+            {"playwright": SimpleNamespace(), "playwright.sync_api": sync_api, "instaloader": instaloader},
+        ):
+            auth._interactive_browser_login(browser="firefox")
+
+        self.assertEqual(launch_calls, [{"headless": False}])
+
+    def test_launch_failure_for_known_channel_hints_at_the_browser(self) -> None:
+        page = _FakePage(cookies_sequence=[[]])
+        browser = _FakeBrowser(page)
+        sync_api = _fake_sync_playwright_module(page, browser, launch_error=RuntimeError("boom"))
+        instaloader = SimpleNamespace(Instaloader=lambda **kwargs: self.fail("should not be reached"))
+
+        with patch.dict(
+            "sys.modules",
+            {"playwright": SimpleNamespace(), "playwright.sync_api": sync_api, "instaloader": instaloader},
+        ):
+            with self.assertRaises(SystemExit) as cm:
+                auth._interactive_browser_login(browser="chrome")
+
+        self.assertIn("chrome", str(cm.exception))
+
+    def test_launch_failure_for_bundled_chromium_hints_at_install(self) -> None:
+        page = _FakePage(cookies_sequence=[[]])
+        browser = _FakeBrowser(page)
+        sync_api = _fake_sync_playwright_module(page, browser, launch_error=RuntimeError("boom"))
+        instaloader = SimpleNamespace(Instaloader=lambda **kwargs: self.fail("should not be reached"))
+
+        with patch.dict(
+            "sys.modules",
+            {"playwright": SimpleNamespace(), "playwright.sync_api": sync_api, "instaloader": instaloader},
+        ):
+            with self.assertRaises(SystemExit) as cm:
+                auth._interactive_browser_login(browser="firefox")
+
+        self.assertIn("playwright install chromium", str(cm.exception))
 
 
 class AuthSessionTests(unittest.TestCase):

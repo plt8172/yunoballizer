@@ -8,7 +8,10 @@ practical alternative to that. Two ways to obtain them:
 - `--interactive`: open a dedicated, disposable browser window, let the
   user log in inside it, and read the session straight out of that window.
   This is the better way to add another account, since it doesn't require
-  logging the everyday browser in and out of accounts.
+  logging the everyday browser in and out of accounts. When possible it
+  drives an already-installed Chrome/Edge (via Playwright's `channel`
+  option) rather than a separately downloaded browser -- see
+  INTERACTIVE_LOGIN_CHANNELS.
 
 Either way, instead of fetch silently reusing whatever session it finds on
 every run, `auth login` imports it once, asks the user to confirm it's the
@@ -131,12 +134,32 @@ def _cookiejar_from_playwright_cookies(cookies: list[dict]) -> http.cookiejar.Co
     return jar
 
 
-def _interactive_browser_login(timeout_seconds: int = INTERACTIVE_LOGIN_TIMEOUT_SECONDS) -> Any:
+# Playwright can drive an already-installed system browser via its `channel`
+# option instead of downloading its own bundled Chromium -- but only for
+# Chrome/Edge, and browser_cookie3's naming ("edge") doesn't match
+# Playwright's channel naming ("msedge"), hence this map.
+INTERACTIVE_LOGIN_CHANNELS = {
+    "chrome": "chrome",
+    "edge": "msedge",
+}
+
+
+def _interactive_browser_login(
+    browser: str = DEFAULT_BROWSER,
+    timeout_seconds: int = INTERACTIVE_LOGIN_TIMEOUT_SECONDS,
+) -> Any:
     """Open a dedicated browser window, wait for the user to log in, and return an authenticated loader.
 
     Unlike importing from the everyday browser, this doesn't depend on
     whatever account happens to already be logged in there -- the user logs
     in fresh, in a disposable window, for whichever account they want to add.
+
+    When `browser` is "chrome" or "edge", this drives the system's actual
+    installed browser (via Playwright's `channel` option) rather than
+    Playwright's own bundled Chromium -- no `playwright install` step needed
+    as long as that browser is already installed. Any other value falls
+    back to Playwright's bundled Chromium, which does require
+    `playwright install chromium`.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -144,15 +167,34 @@ def _interactive_browser_login(timeout_seconds: int = INTERACTIVE_LOGIN_TIMEOUT_
     except ImportError as exc:
         raise SystemExit(
             "Interactive login requires the 'playwright' package: "
-            "pip install yunoballizer[interactive] && playwright install chromium"
+            "pip install yunoballizer[interactive]"
         ) from exc
 
+    channel = INTERACTIVE_LOGIN_CHANNELS.get(browser)
     print("Opening a browser window for Instagram login. Log in there, then return here.")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
         try:
-            page = browser.new_page()
+            launch_kwargs = {"headless": False}
+            if channel:
+                launch_kwargs["channel"] = channel
+            browser_instance = p.chromium.launch(**launch_kwargs)
+        except Exception as exc:
+            if channel:
+                hint = (
+                    f"Could not launch installed {browser}: {exc}\n"
+                    f"Make sure {browser} is installed, or pass a different -b/--browser."
+                )
+            else:
+                hint = (
+                    f"Could not launch Playwright's bundled Chromium: {exc}\n"
+                    "Run `playwright install chromium`, or pass -b chrome / -b edge "
+                    "to drive an already-installed browser instead (no download needed)."
+                )
+            raise SystemExit(hint) from exc
+
+        try:
+            page = browser_instance.new_page()
             page.goto("https://www.instagram.com/accounts/login/")
 
             deadline = time.monotonic() + timeout_seconds
@@ -168,7 +210,7 @@ def _interactive_browser_login(timeout_seconds: int = INTERACTIVE_LOGIN_TIMEOUT_
             if not logged_in:
                 raise SystemExit("Timed out waiting for login in the browser window.")
         finally:
-            browser.close()
+            browser_instance.close()
 
     loader = instaloader.Instaloader(quiet=True)
     loader.context.update_cookies(_cookiejar_from_playwright_cookies(cookies))
@@ -196,8 +238,8 @@ def login(
     prompt (e.g. for scripted use).
     """
     if interactive:
-        loader = _interactive_browser_login()
-        source = "the login window"
+        loader = _interactive_browser_login(browser)
+        source = f"the login window ({browser})"
     else:
         loader = _import_from_browser(browser)
         source = browser

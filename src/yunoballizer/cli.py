@@ -60,9 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     login_parser.add_argument(
         "-b", "--browser", default=auth.DEFAULT_BROWSER,
-        help=f"Browser to import the Instagram login session's cookies from (default: {auth.DEFAULT_BROWSER}). "
-             "Avoids Instagram's automated-login checkpoint by reusing an already-logged-in session. "
-             "Ignored with --interactive.",
+        help=f"Without --interactive: browser to import the Instagram login session's cookies from "
+             f"(default: {auth.DEFAULT_BROWSER}). Avoids Instagram's automated-login checkpoint by "
+             "reusing an already-logged-in session. "
+             "With --interactive: 'chrome' or 'edge' drives that already-installed browser directly "
+             f"(no download needed); any other value falls back to Playwright's own Chromium "
+             "(requires `playwright install chromium`).",
     )
     login_parser.add_argument(
         "-i", "--interactive", action="store_true",

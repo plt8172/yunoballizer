@@ -47,8 +47,12 @@ importing cookies from your everyday browser):
 
 ```bash
 pip install -e ".[interactive]"
-playwright install chromium
 ```
+
+That's enough if you have Chrome or Edge installed -- `--interactive` drives
+that browser directly, no extra download. Only run
+`playwright install chromium` if you want it to fall back to Playwright's
+own bundled Chromium instead (e.g. neither Chrome nor Edge is installed).
 
 ## First-time setup
 
@@ -102,7 +106,11 @@ that. `yuno auth login` gets those cookies one of two ways:
 - **`-i`/`--interactive`:** opens a separate, disposable browser window and
   waits for you to log in inside it. This is the better way to add another
   account -- it doesn't touch your everyday browser's session at all, so you
-  never have to log it out of one account to log in as another.
+  never have to log it out of one account to log in as another. With
+  `-b chrome` or `-b edge` (chrome is the default) it drives that
+  already-installed browser directly -- no extra download. Any other `-b`
+  value falls back to Playwright's own bundled Chromium, which does need
+  `playwright install chromium` first.
 
 Either way, it never asks for or stores your Instagram password -- only
 the session cookies Instagram itself issues after you log in.

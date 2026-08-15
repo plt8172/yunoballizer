@@ -66,8 +66,7 @@ yuno fetch                # Login required. Adds saved-post authors to Instagram
 yuno expand               # No login required. Adds @mentions from downloaded Instagram captions
 yuno profile              # Build/refresh a content profile from downloaded Instagram captions
 yuno curate               # Curate downloaded posts against the content profile
-yuno select                # Mark favorites in review/ with an image viewer (default: nsxiv)
-yuno select --viewer "sxiv -o -t"  # Use a different viewer command
+yuno select                # Browse review/ in fzf: Tab to mark, Enter to confirm, o to open natively
 yuno export                # Copy/hardlink everything you've selected into selected/
 yuno all                  # download + curate (cron entry point)
 ```
@@ -163,21 +162,28 @@ never show up here either. If you want an automatically curated subset, use
 `yuno curate`, which copies posts it keeps into `curated/`.
 
 **`yuno select`** is for manually picking favorites instead of relying on
-automatic curation. It launches an external image viewer's mark mode (nsxiv
-by default -- `-o -t` for thumbnail-grid mode that prints marked files to
-stdout on quit) over `review/`, then records whatever you marked into
-`selection_log.json` as a plain manifest. review/'s symlinks are still just a
-disposable browsing index, so selection state deliberately lives outside the
-filesystem instead of being encoded via symlinks -- nothing about marking a
-file changes `review/` or `sources/`. Run `yuno export` afterwards to
-materialize the manifest into `selected/`: real files (hardlinked when
-`selected/` shares a filesystem with `sources/`, copied otherwise), not
-symlinks, so `selected/` works with any downstream tool, sync client, or
-mobile app without special-casing links. `nsxiv` is an optional runtime
-dependency invoked as a subprocess -- install it separately (`nsxiv` is
-GPL-2, but yunoballizer only shells out to it rather than linking against
-it, so that doesn't affect this project's own license), or point `--viewer`
-at any command that prints marked file paths to stdout on exit.
+automatic curation. It browses `review/` in [fzf](https://github.com/junegunn/fzf):
+Tab marks any number of files, Enter confirms, and whatever you marked gets
+recorded into `selection_log.json` as a plain manifest. review/'s symlinks
+are still just a disposable browsing index, so selection state deliberately
+lives outside the filesystem instead of being encoded via symlinks --
+nothing about marking a file changes `review/` or `sources/`. Run
+`yuno export` afterwards to materialize the manifest into `selected/`: real
+files (hardlinked when `selected/` shares a filesystem with `sources/`,
+copied otherwise), not symlinks, so `selected/` works with any downstream
+tool, sync client, or mobile app without special-casing links.
+
+The picker previews each highlighted file with
+[`viu`](https://github.com/atanunq/viu) -- videos show a single
+representative frame (extracted with `ffmpeg`, if installed) rather than
+playing back in the terminal, since that turned out to be the simplest thing
+that works identically across macOS/Windows/Linux without heavier
+dependencies. Press `o` on the highlighted file to open it in your OS's
+default viewer/player instead, for a closer look or if you need to edit it.
+`fzf` and `viu` are required for `yuno select`; `ffmpeg` is optional (video
+previews just fall back to a placeholder line without it). All three are
+invoked as subprocesses only, never linked against, so their own licenses
+don't affect this project's.
 
 ## Uninstalling
 

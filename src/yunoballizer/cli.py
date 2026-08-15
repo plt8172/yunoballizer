@@ -4,9 +4,9 @@ from __future__ import annotations
 import argparse
 import base64
 import logging
-import shlex
 import sys
 import zlib
+from pathlib import Path
 
 from . import config, expand, fetch, prune, storage
 from . import profile as profile_mod
@@ -32,7 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
 
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(
+        dest="command", required=True,
+        metavar="{download,fetch,expand,profile,curate,select,export,all,prune}",
+    )
 
     download_parser = sub.add_parser("download", help="No login required. Anonymous harvesting of accounts + urls.txt")
     download_parser.add_argument(
@@ -59,17 +62,21 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("profile", help="Build/refresh the content profile from downloaded Instagram captions")
     sub.add_parser("curate", help="Curate new posts against the content profile")
 
-    select_parser = sub.add_parser(
-        "select", help="Mark favorites in review/ with an external image viewer (default: nsxiv)"
-    )
-    select_parser.add_argument(
-        "--viewer", default=None,
-        help="Override the viewer command as a single quoted string, e.g. \"sxiv -o -t\" "
-             "(default: \"nsxiv -o -t\"). Must print marked file paths to stdout on exit.",
+    sub.add_parser(
+        "select",
+        help="Browse review/ in fzf (Tab to mark, Enter to confirm, o to open in your OS's default viewer/player)",
     )
     sub.add_parser("export", help="Copy/hardlink selected media into selected/")
 
     sub.add_parser("all", help="Run download then curate (cron entry point)")
+
+    # Internal plumbing: fzf's --preview and 'o' keybind shell out to these
+    # rather than an inline shell script, so `select.pick()` never needs to
+    # know which shell fzf happens to invoke on a given platform.
+    preview_parser = sub.add_parser("_preview")
+    preview_parser.add_argument("path")
+    open_parser = sub.add_parser("_open")
+    open_parser.add_argument("path")
 
     prune_parser = sub.add_parser(
         "prune",
@@ -139,9 +146,13 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "curate":
         curate_mod.run()
     elif args.command == "select":
-        select_mod.run_select(viewer=shlex.split(args.viewer) if args.viewer else None)
+        select_mod.run_select()
     elif args.command == "export":
         select_mod.run_export()
+    elif args.command == "_preview":
+        select_mod.render_preview(Path(args.path))
+    elif args.command == "_open":
+        select_mod.open_native(Path(args.path))
     elif args.command == "all":
         _run_download()
         if (config.DERIVED_DIR / profile_mod.PROFILE_FILENAME).exists():

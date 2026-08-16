@@ -222,7 +222,7 @@ def _obtain_session(browser: str) -> tuple[Any, str]:
     try:
         loader = _interactive_browser_login(browser)
         return loader, f"the login window ({browser})"
-    except SystemExit as exc:
+    except (SystemExit, Exception) as exc:
         print(f"Interactive login failed: {exc}\nLoading browser cookies instead...")
         return _import_from_browser(browser), browser
 
@@ -264,11 +264,19 @@ def login(
 
 
 def _check_session(username: str) -> tuple[bool, str]:
-    """Try loading a saved session, without raising. Returns (is_valid, detail)."""
+    """Load and validate a saved session without raising."""
     try:
-        _load_session(username)
+        loader = _load_session(username)
+        logged_in_as = loader.test_login()
     except SystemExit as exc:
         return False, str(exc)
+    except Exception as exc:
+        return False, f"Could not verify the saved session for @{username}: {exc}"
+
+    if not logged_in_as:
+        return False, f"The saved session for @{username} is no longer logged in."
+    if logged_in_as != username:
+        return False, f"The saved session for @{username} is logged in as @{logged_in_as}."
     return True, ""
 
 

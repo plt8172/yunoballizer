@@ -296,6 +296,25 @@ class ObtainSessionTests(unittest.TestCase):
         self.assertEqual(source, "chrome")
         self.assertIn("could not launch chrome", out.getvalue())
 
+    def test_falls_back_to_cookies_on_playwright_runtime_error(self) -> None:
+        loader = object()
+        out = io.StringIO()
+        with (
+            patch.object(
+                auth,
+                "_interactive_browser_login",
+                side_effect=RuntimeError("page was closed"),
+            ),
+            patch.object(auth, "_import_from_browser", return_value=loader) as mock_cookie_import,
+            redirect_stdout(out),
+        ):
+            result_loader, source = auth._obtain_session("chrome")
+
+        mock_cookie_import.assert_called_once_with("chrome")
+        self.assertIs(result_loader, loader)
+        self.assertEqual(source, "chrome")
+        self.assertIn("page was closed", out.getvalue())
+
     def test_skips_interactive_for_unsupported_browser(self) -> None:
         loader = object()
         out = io.StringIO()
@@ -415,22 +434,46 @@ class AuthSessionTests(unittest.TestCase):
         self._login_as("alice")
         self._login_as("bob")
 
-        def load_session_from_file(username: str, path: str) -> None:
-            if username == "bob":
-                raise Exception("session expired")
-
-        instaloader = SimpleNamespace(
-            Instaloader=lambda **kwargs: SimpleNamespace(load_session_from_file=load_session_from_file)
-        )
+        def load_session(username: str) -> SimpleNamespace:
+            logged_in_as = "alice" if username == "alice" else None
+            return SimpleNamespace(test_login=lambda: logged_in_as)
 
         out = io.StringIO()
-        with patch.dict("sys.modules", {"instaloader": instaloader}), redirect_stdout(out):
+        with patch.object(auth, "_load_session", side_effect=load_session), redirect_stdout(out):
             auth.status(check=True)
 
         output = out.getvalue()
         self.assertIn("alice [ok]", output)
         self.assertIn("bob [EXPIRED", output)
-        self.assertIn("session expired", output)
+        self.assertIn("no longer logged in", output)
+
+    def test_status_check_flags_remote_validation_failure(self) -> None:
+        self._login_as("alice")
+
+        def fail_validation() -> None:
+            raise RuntimeError("request failed")
+
+        loader = SimpleNamespace(test_login=fail_validation)
+
+        out = io.StringIO()
+        with patch.object(auth, "_load_session", return_value=loader), redirect_stdout(out):
+            auth.status(check=True)
+
+        output = out.getvalue()
+        self.assertIn("alice [EXPIRED", output)
+        self.assertIn("request failed", output)
+
+    def test_status_check_flags_session_for_another_account(self) -> None:
+        self._login_as("alice")
+        loader = SimpleNamespace(test_login=lambda: "bob")
+
+        out = io.StringIO()
+        with patch.object(auth, "_load_session", return_value=loader), redirect_stdout(out):
+            auth.status(check=True)
+
+        output = out.getvalue()
+        self.assertIn("alice [EXPIRED", output)
+        self.assertIn("logged in as @bob", output)
 
     def test_status_with_no_sessions(self) -> None:
         out = io.StringIO()

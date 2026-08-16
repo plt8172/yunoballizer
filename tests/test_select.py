@@ -200,6 +200,94 @@ class PickTests(unittest.TestCase):
             mock_render.assert_not_called()
             self.assertEqual(marked, [])
 
+    def test_unbound_keys_cause_no_redraw(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, _ = self._review_dir_with_links(Path(tmpdir), 2)
+            # "x", "z", and a stray escape sequence are not bound to anything.
+            keys = iter(["x", "z", "esc", "q"])
+
+            with (
+                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(select, "_render_item") as mock_render,
+            ):
+                select.pick(source_dir=review_dir)
+
+            # Only the initial render before the loop starts -- none of the
+            # unbound keys should trigger another one.
+            mock_render.assert_called_once()
+
+    def test_clamped_movement_does_not_redraw(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, _ = self._review_dir_with_links(Path(tmpdir), 2)
+            # Already at index 0; "left" can't move further, so no redraw.
+            keys = iter(["left", "left", "q"])
+
+            with (
+                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(select, "_render_item") as mock_render,
+            ):
+                select.pick(source_dir=review_dir)
+
+            mock_render.assert_called_once()
+
+
+class DescribeTests(unittest.TestCase):
+    def test_splits_platform_account_post_id_and_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir) / "sources"
+            post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
+            post_dir.mkdir(parents=True)
+            media = post_dir / "image_02.jpg"
+            media.write_bytes(b"data")
+
+            with patch.object(config, "SOURCES_DIR", sources_dir):
+                platform, account, post_id, filename = select._describe(media)
+
+            self.assertEqual((platform, account, post_id, filename),
+                              ("instagram", "nasa", "ShortcodeA", "image_02.jpg"))
+
+    def test_falls_back_to_bare_filename_outside_sources_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir) / "sources"
+            sources_dir.mkdir()
+            outside = Path(tmpdir) / "elsewhere.jpg"
+            outside.write_bytes(b"data")
+
+            with patch.object(config, "SOURCES_DIR", sources_dir):
+                platform, account, post_id, filename = select._describe(outside)
+
+            self.assertEqual((platform, account, post_id), ("", "", ""))
+            self.assertEqual(filename, "elsewhere.jpg")
+
+
+class RenderItemTests(unittest.TestCase):
+    def test_resolves_symlink_before_looking_up_caption(self) -> None:
+        """Regression test: find_caption() needs the real sources/ post
+        directory, not review/'s flat symlink directory, or captions never
+        show up even when caption.txt exists right next to the media."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            sources_dir = root / "sources"
+            review_dir = root / "review"
+            review_dir.mkdir()
+            post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
+            post_dir.mkdir(parents=True)
+            media = post_dir / "image_01.jpg"
+            media.write_bytes(b"data")
+            (post_dir / "caption.txt").write_text("hello world", encoding="utf-8")
+            link = review_dir / "link.jpg"
+            link.symlink_to(media)
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(select, "render_preview"),
+                patch("builtins.print") as mock_print,
+            ):
+                select._render_item(link, 0, 1, set())
+
+            printed = "\n".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
+            self.assertIn("hello world", printed)
+
 
 class RenderPreviewTests(unittest.TestCase):
     def test_image_is_previewed_directly_with_viu(self) -> None:
@@ -213,6 +301,7 @@ class RenderPreviewTests(unittest.TestCase):
             mock_run.assert_called_once()
             args = mock_run.call_args[0][0]
             self.assertEqual(args[0], "viu")
+            self.assertEqual(args[1], "-h")
             self.assertEqual(args[-1], str(image))
 
     def test_video_extracts_frame_with_ffmpeg_then_previews_with_viu(self) -> None:

@@ -13,8 +13,8 @@ terminal at once -- the list reads keystrokes from stdin while the image
 tool queries the terminal for cursor position over that same stdin, and the
 terminal's pixel-per-cell report is often unreliable inside a piped preview
 subprocess. Both cause real, frequent corruption in practice. Rendering
-one full-width item at a time means only one process ever touches the
-terminal at a time, and it always finishes before the next keypress is read.
+one item at a time means only one process ever touches the terminal at a
+time, and it always finishes before the next keypress is read.
 """
 from __future__ import annotations
 
@@ -76,21 +76,39 @@ def _read_key() -> str:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
-def _account_label(path: Path) -> str:
+def _describe(path: Path) -> tuple[str, str, str, str]:
+    """Pull (platform, account, post_id, filename) out of the sources/-relative
+    path alone -- no metadata.json.xz parsing needed."""
     try:
-        return str(path.resolve().relative_to(config.SOURCES_DIR).parent)
+        parts = path.resolve().relative_to(config.SOURCES_DIR).parts
     except ValueError:
-        return path.name
+        parts = ()
+    if len(parts) < 3:
+        return "", "", "", path.name
+    platform = parts[0]
+    post_id = parts[-2]
+    account = "/".join(parts[1:-2]) or "unknown"
+    filename = parts[-1]
+    return platform, account, post_id, filename
+
+
+def _format_size(num_bytes: int) -> str:
+    if num_bytes >= 1024 * 1024:
+        return f"{num_bytes / (1024 * 1024):.1f} MB"
+    return f"{num_bytes / 1024:.0f} KB"
 
 
 def _render_item(path: Path, index: int, total: int, marked: set[Path]) -> None:
     print("\x1b[2J\x1b[H", end="")
-    star = " [SELECTED]" if path.resolve() in marked else ""
-    print(f"[{index + 1}/{total}] {_account_label(path)}{star}")
+    resolved = path.resolve()
+    platform, account, post_id, filename = _describe(path)
+    size = _format_size(resolved.stat().st_size)
+    star = " [SELECTED]" if resolved in marked else ""
+    print(f"[{index + 1}/{total}] {platform} / {account} / {post_id} / {filename} ({size}){star}")
     print()
     render_preview(path)
     print()
-    caption = find_caption(path).strip()
+    caption = find_caption(resolved).strip()
     if caption:
         print(caption[:300])
         print()
@@ -110,15 +128,21 @@ def pick(source_dir: Path | None = None) -> list[Path]:
 
     index = 0
     marked: set[Path] = set()
+    _render_item(files[index], index, len(files), marked)
     while True:
-        _render_item(files[index], index, len(files), marked)
         key = _read_key()
         if key in ("\r", "\n", "q", "\x03"):
             break
         elif key in ("left", "up"):
-            index = max(index - 1, 0)
+            new_index = max(index - 1, 0)
+            if new_index == index:
+                continue
+            index = new_index
         elif key in ("right", "down"):
-            index = min(index + 1, len(files) - 1)
+            new_index = min(index + 1, len(files) - 1)
+            if new_index == index:
+                continue
+            index = new_index
         elif key == "s":
             resolved = files[index].resolve()
             if resolved in marked:
@@ -127,12 +151,22 @@ def pick(source_dir: Path | None = None) -> list[Path]:
                 marked.add(resolved)
         elif key == "o":
             open_native(files[index])
+        else:
+            continue
+        _render_item(files[index], index, len(files), marked)
 
     return list(marked)
 
 
 def render_preview(path: Path) -> None:
-    """Print a preview of the current item to stdout, sized to the terminal width.
+    """Print a preview of the current item to stdout, scaled to fit the
+    terminal's height so it never gets cropped.
+
+    Only height is constrained (not both width and height -- viu stretches
+    and distorts the aspect ratio when both are given). Sizing by height
+    alone works well here because this project's content is overwhelmingly
+    portrait/square (Instagram posts, Shorts, Reels): scaling those to fit
+    the available rows keeps the width comfortably inside the terminal too.
 
     Videos get a single representative frame (via ffmpeg) shown as an image;
     anything ffmpeg/viu can't handle degrades to a placeholder line instead
@@ -158,9 +192,9 @@ def render_preview(path: Path) -> None:
             tmp_frame.unlink(missing_ok=True)
             return
 
-    width = str(shutil.get_terminal_size().columns)
+    height = str(max(shutil.get_terminal_size().lines - 3, 5))
     try:
-        subprocess.run(["viu", "-w", width, str(target)])
+        subprocess.run(["viu", "-h", height, str(target)])
     except FileNotFoundError:
         print(f"[install viu to preview: {path.name}]")
     finally:

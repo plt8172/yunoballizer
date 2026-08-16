@@ -33,6 +33,51 @@ class RecordSelectionTests(unittest.TestCase):
             self.assertEqual(added_second, 0)
             self.assertTrue(log_path.exists())
 
+    def test_removes_entries_missing_from_updated_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            sources_dir = root / "sources"
+            post_dir = sources_dir / "instagram" / "acct" / "postid"
+            post_dir.mkdir(parents=True)
+            first = post_dir / "image_01.jpg"
+            second = post_dir / "image_02.jpg"
+            first.write_bytes(b"first")
+            second.write_bytes(b"second")
+            log_path = root / "state" / "selection_log.json"
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "SELECTION_LOG_PATH", log_path),
+            ):
+                select.record_selection([first, second])
+                changes = select.record_selection([second], candidates=[first, second])
+                selected = select._selected_paths()
+
+            self.assertEqual(changes, 1)
+            self.assertEqual(selected, {second.resolve()})
+
+    def test_accepts_resolved_paths_when_sources_dir_is_a_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            external_sources = root / "external" / "sources"
+            post_dir = external_sources / "instagram" / "acct" / "postid"
+            post_dir.mkdir(parents=True)
+            media = post_dir / "image_01.jpg"
+            media.write_bytes(b"data")
+            sources_link = root / "sources"
+            sources_link.symlink_to(external_sources, target_is_directory=True)
+            log_path = root / "state" / "selection_log.json"
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_link),
+                patch.object(config, "SELECTION_LOG_PATH", log_path),
+            ):
+                changes = select.record_selection([media.resolve()])
+                selected = select._selected_paths()
+
+            self.assertEqual(changes, 1)
+            self.assertEqual(selected, {media.resolve()})
+
     def test_skips_paths_outside_sources_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -158,6 +203,42 @@ class PickTests(unittest.TestCase):
                 marked = select.pick(source_dir=review_dir)
 
             self.assertEqual(marked, [])
+
+    def test_restores_persisted_selection_and_allows_deselecting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            sources_dir = root / "sources"
+            post_dir = sources_dir / "instagram" / "acct" / "postid"
+            post_dir.mkdir(parents=True)
+            media = post_dir / "image_01.jpg"
+            media.write_bytes(b"data")
+            review_dir = root / "review"
+            review_dir.mkdir()
+            (review_dir / "link.jpg").symlink_to(media)
+            log_path = root / "selection_log.json"
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "SELECTION_LOG_PATH", log_path),
+            ):
+                select.record_selection([media])
+                rendered_marks = []
+
+                def capture_render(*args):
+                    rendered_marks.append(set(args[3]))
+
+                with (
+                    patch.object(select, "_read_key", side_effect=["s", "q"]),
+                    patch.object(select, "_render_item", side_effect=capture_render),
+                ):
+                    marked = select.pick(source_dir=review_dir)
+                changes = select.record_selection(marked, candidates=[media])
+                persisted = select._selected_paths()
+
+            self.assertIn(media.resolve(), rendered_marks[0])
+            self.assertEqual(marked, [])
+            self.assertEqual(changes, 1)
+            self.assertEqual(persisted, set())
 
     def test_index_clamps_at_bounds_instead_of_wrapping(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -420,6 +501,21 @@ class RenderPreviewTests(unittest.TestCase):
             self.assertEqual(calls[0][0], "ffmpeg")
             self.assertEqual(calls[1][0], "viu")
             self.assertNotEqual(calls[1][-1], str(video))
+
+    def test_video_preview_closes_mkstemp_descriptor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video = Path(tmpdir) / "clip.mp4"
+            video.write_bytes(b"data")
+            frame = Path(tmpdir) / "frame.jpg"
+
+            with (
+                patch("tempfile.mkstemp", return_value=(123, str(frame))),
+                patch("os.close") as mock_close,
+                patch("subprocess.run"),
+            ):
+                select.render_preview(video)
+
+            mock_close.assert_called_once_with(123)
 
     def test_missing_ffmpeg_degrades_to_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

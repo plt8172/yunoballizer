@@ -48,6 +48,12 @@ def _save_log(log: dict) -> None:
     config.SELECTION_LOG_PATH.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _selected_paths() -> set[Path]:
+    """Return manifest entries as canonical paths under the configured sources root."""
+    sources_dir = config.SOURCES_DIR.resolve()
+    return {(sources_dir / key).resolve() for key in _load_log()}
+
+
 def _read_key() -> str:
     """Block for a single raw keypress, normalizing arrow keys to up/down/left/right."""
     if sys.platform == "win32":
@@ -80,7 +86,7 @@ def _describe(path: Path) -> tuple[str, str, str, str]:
     """Pull (platform, account, post_id, filename) out of the sources/-relative
     path alone -- no metadata.json.xz parsing needed."""
     try:
-        parts = path.resolve().relative_to(config.SOURCES_DIR).parts
+        parts = path.resolve().relative_to(config.SOURCES_DIR.resolve()).parts
     except ValueError:
         parts = ()
     if len(parts) < 3:
@@ -148,7 +154,8 @@ def pick(source_dir: Path | None = None) -> list[Path]:
         return []
 
     index = 0
-    marked: set[Path] = set()
+    available = {path.resolve() for path in files}
+    marked = _selected_paths() & available
     _render_item(files[index], index, len(files), marked)
     while True:
         key = _read_key()
@@ -204,7 +211,9 @@ def render_preview(path: Path, height: int | None = None) -> None:
     target = path
     tmp_frame: Path | None = None
     if path.suffix.lower() in VIDEO_EXTS:
-        tmp_frame = Path(tempfile.mkstemp(suffix=".jpg")[1])
+        fd, tmp_name = tempfile.mkstemp(suffix=".jpg")
+        os.close(fd)
+        tmp_frame = Path(tmp_name)
         try:
             subprocess.run(
                 ["ffmpeg", "-y", "-loglevel", "error", "-i", str(path),
@@ -239,23 +248,37 @@ def open_native(path: Path) -> None:
         subprocess.run(["xdg-open", str(path)])
 
 
-def record_selection(paths: list[Path]) -> int:
-    """Add newly marked media to the selection manifest. Returns count actually added."""
+def record_selection(paths: list[Path], candidates: list[Path] | None = None) -> int:
+    """Update selected paths and return the number of manifest changes.
+
+    When candidates is supplied, entries in that browsed set are synchronized
+    so deselections are recorded. Entries outside the set remain untouched.
+    Without candidates this retains the original additive behavior.
+    """
     log = _load_log()
-    added = 0
+    sources_dir = config.SOURCES_DIR.resolve()
+    selected = dict(log)
+
+    if candidates is not None:
+        for path in candidates:
+            try:
+                key = str(path.resolve().relative_to(sources_dir))
+            except ValueError:
+                continue
+            selected.pop(key, None)
+
     for path in paths:
         try:
-            key = str(path.relative_to(config.SOURCES_DIR))
+            key = str(path.resolve().relative_to(sources_dir))
         except ValueError:
             logger.warning("Skipping %s: not under sources/", path)
             continue
-        if key in log:
-            continue
-        log[key] = {"selected_at": time.time()}
-        added += 1
-    if added:
-        _save_log(log)
-    return added
+        selected[key] = log.get(key, {"selected_at": time.time()})
+
+    changes = len(set(log) ^ set(selected))
+    if changes:
+        _save_log(selected)
+    return changes
 
 
 def export() -> int:
@@ -283,8 +306,13 @@ def export() -> int:
 
 def run_select() -> None:
     marked = pick()
-    added = record_selection(marked)
-    logger.info("Marked: %d, newly added to selection manifest: %d", len(marked), added)
+    candidates = (
+        [path for path in config.REVIEW_DIR.iterdir() if path.is_file()]
+        if config.REVIEW_DIR.exists()
+        else []
+    )
+    changes = record_selection(marked, candidates=candidates)
+    logger.info("Selected: %d, selection manifest changes: %d", len(marked), changes)
 
 
 def run_export() -> None:

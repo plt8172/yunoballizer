@@ -104,15 +104,34 @@ def _render_item(path: Path, index: int, total: int, marked: set[Path]) -> None:
     platform, account, post_id, filename = _describe(path)
     size = _format_size(resolved.stat().st_size)
     star = " [SELECTED]" if resolved in marked else ""
-    print(f"[{index + 1}/{total}] {platform} / {account} / {post_id} / {filename} ({size}){star}")
+    header = f"[{index + 1}/{total}] {platform} / {account} / {post_id} / {filename} ({size}){star}"
+    footer = "<-/-> move   s select/deselect   o open natively   Enter/q finish"
+
+    # Truncate to a single line (not wrapped) so its screen-row cost is
+    # predictable -- a caption that wraps across several rows would throw
+    # off the line budget below.
+    columns = shutil.get_terminal_size().columns
+    caption = find_caption(resolved).strip().replace("\n", " ")
+    caption_line = caption[: max(columns - 1, 10)] if caption else ""
+
+    # Every row besides the image itself: header, a blank line on each side
+    # of the image, the footer, plus the caption and its trailing blank line
+    # if there is one. Sizing the image to anything less strict than this
+    # pushes the total past the terminal's row count, which forces a scroll
+    # that carries the header (printed first) right off the top of the
+    # screen -- that's what showed up as the header "flashing" and vanishing.
+    reserved = 4 + (2 if caption_line else 0)
+    height = max(shutil.get_terminal_size().lines - reserved, 5)
+
+    print(header)
     print()
-    render_preview(path)
+    render_preview(path, height=height)
     print()
-    caption = find_caption(resolved).strip()
-    if caption:
-        print(caption[:300])
+    if caption_line:
+        print(caption_line)
         print()
-    print("<-/-> move   s select/deselect   o open natively   Enter/q finish")
+    print(footer)
+    sys.stdout.flush()
 
 
 def pick(source_dir: Path | None = None) -> list[Path]:
@@ -158,15 +177,19 @@ def pick(source_dir: Path | None = None) -> list[Path]:
     return list(marked)
 
 
-def render_preview(path: Path) -> None:
-    """Print a preview of the current item to stdout, scaled to fit the
-    terminal's height so it never gets cropped.
+def render_preview(path: Path, height: int | None = None) -> None:
+    """Print a preview of the current item to stdout, scaled to fit height
+    rows so it never gets cropped.
 
     Only height is constrained (not both width and height -- viu stretches
     and distorts the aspect ratio when both are given). Sizing by height
     alone works well here because this project's content is overwhelmingly
     portrait/square (Instagram posts, Shorts, Reels): scaling those to fit
     the available rows keeps the width comfortably inside the terminal too.
+
+    height defaults to the terminal's own height (minus a small margin) for
+    standalone use; _render_item() passes an exact budget that also accounts
+    for the header/caption/footer lines it prints around the image.
 
     Videos get a single representative frame (via ffmpeg) shown as an image;
     anything ffmpeg/viu can't handle degrades to a placeholder line instead
@@ -192,9 +215,11 @@ def render_preview(path: Path) -> None:
             tmp_frame.unlink(missing_ok=True)
             return
 
-    height = str(max(shutil.get_terminal_size().lines - 3, 5))
+    if height is None:
+        height = max(shutil.get_terminal_size().lines - 3, 5)
+    sys.stdout.flush()
     try:
-        subprocess.run(["viu", "-h", height, str(target)])
+        subprocess.run(["viu", "-h", str(height), str(target)])
     except FileNotFoundError:
         print(f"[install viu to preview: {path.name}]")
     finally:

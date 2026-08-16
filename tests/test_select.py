@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import errno
+import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -288,6 +290,64 @@ class RenderItemTests(unittest.TestCase):
             printed = "\n".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
             self.assertIn("hello world", printed)
 
+    def _item(self, root: Path, caption: str | None) -> tuple[Path, Path]:
+        sources_dir = root / "sources"
+        post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
+        post_dir.mkdir(parents=True)
+        media = post_dir / "image_01.jpg"
+        media.write_bytes(b"data")
+        if caption is not None:
+            (post_dir / "caption.txt").write_text(caption, encoding="utf-8")
+        return sources_dir, media
+
+    def test_image_height_budget_never_exceeds_terminal_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir, media = self._item(Path(tmpdir), caption=None)
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch("shutil.get_terminal_size", return_value=os.terminal_size((100, 40))),
+                patch.object(select, "render_preview") as mock_preview,
+                patch("builtins.print"),
+            ):
+                select._render_item(media, 0, 1, set())
+
+            height = mock_preview.call_args.kwargs["height"]
+            # header + blank + blank + footer = 4 fixed rows, no caption here.
+            self.assertEqual(height, 40 - 4)
+
+    def test_image_height_budget_accounts_for_caption_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir, media = self._item(Path(tmpdir), caption="a short caption")
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch("shutil.get_terminal_size", return_value=os.terminal_size((100, 40))),
+                patch.object(select, "render_preview") as mock_preview,
+                patch("builtins.print"),
+            ):
+                select._render_item(media, 0, 1, set())
+
+            height = mock_preview.call_args.kwargs["height"]
+            # 4 fixed rows + caption line + its trailing blank line.
+            self.assertEqual(height, 40 - 6)
+
+    def test_long_caption_is_truncated_to_a_single_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir, media = self._item(Path(tmpdir), caption="x" * 500)
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch("shutil.get_terminal_size", return_value=os.terminal_size((60, 40))),
+                patch.object(select, "render_preview"),
+                patch("builtins.print") as mock_print,
+            ):
+                select._render_item(media, 0, 1, set())
+
+            caption_lines = [c.args[0] for c in mock_print.call_args_list if c.args and "x" in str(c.args[0])]
+            self.assertEqual(len(caption_lines), 1)
+            self.assertLess(len(caption_lines[0]), 60)
+
 
 class RenderPreviewTests(unittest.TestCase):
     def test_image_is_previewed_directly_with_viu(self) -> None:
@@ -303,6 +363,17 @@ class RenderPreviewTests(unittest.TestCase):
             self.assertEqual(args[0], "viu")
             self.assertEqual(args[1], "-h")
             self.assertEqual(args[-1], str(image))
+
+    def test_explicit_height_is_used_verbatim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image = Path(tmpdir) / "photo.jpg"
+            image.write_bytes(b"data")
+
+            with patch("subprocess.run") as mock_run:
+                select.render_preview(image, height=17)
+
+            args = mock_run.call_args[0][0]
+            self.assertEqual(args[2], "17")
 
     def test_video_extracts_frame_with_ffmpeg_then_previews_with_viu(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

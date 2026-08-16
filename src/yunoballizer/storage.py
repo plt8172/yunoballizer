@@ -9,6 +9,7 @@ tree; deleting it and re-running `download` regenerates it from sources/.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import lzma
 import os

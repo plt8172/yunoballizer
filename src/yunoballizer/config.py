@@ -59,10 +59,12 @@ SOURCES_DIR = DATA_DIR / "sources"
 REVIEW_DIR = DATA_DIR / "review"
 CURATED_DIR = DATA_DIR / "curated"
 DERIVED_DIR = DATA_DIR / "derived"
+SELECTED_DIR = DATA_DIR / "selected"
 
 ARCHIVE_DIR = STATE_DIR / "archives"
 LOG_DIR = STATE_DIR / "logs"
 CURATION_LOG_PATH = STATE_DIR / "curation_log.json"
+SELECTION_LOG_PATH = STATE_DIR / "selection_log.json"
 
 TEMPLATE_FILES = [
     "instagram/accounts.txt",
@@ -75,7 +77,7 @@ TEMPLATE_FILES = [
 def ensure_config() -> None:
     """Create config/data/state directories and populate missing config templates."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    for directory in (SOURCES_DIR, REVIEW_DIR, CURATED_DIR, DERIVED_DIR, ARCHIVE_DIR, LOG_DIR):
+    for directory in (SOURCES_DIR, REVIEW_DIR, CURATED_DIR, DERIVED_DIR, SELECTED_DIR, ARCHIVE_DIR, LOG_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
     for name in TEMPLATE_FILES:

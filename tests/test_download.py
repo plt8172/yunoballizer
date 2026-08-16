@@ -13,8 +13,9 @@ from yunoballizer.downloaders import instagram, tiktok, youtube, ytdlp_helper
 class _FakeProfile:
     """A hashable stand-in for instaloader.Profile (needed for the {profile} set literal)."""
 
-    def __init__(self, username: str) -> None:
+    def __init__(self, username: str, userid: int = 42) -> None:
         self.username = username
+        self.userid = userid
 
 
 class YtdlpHelperTests(unittest.TestCase):
@@ -46,6 +47,7 @@ class YtdlpHelperTests(unittest.TestCase):
             },
         )
         self.assertTrue(options["writedescription"])
+        self.assertFalse(options["allow_playlist_files"])
         ydl.download.assert_called_once_with(["https://example.test/post"])
 
 
@@ -87,7 +89,7 @@ class InstagramDownloadTests(unittest.TestCase):
             patch.object(instagram.time, "sleep"),
             patch.object(instagram.storage, "organize_instagram_account"),
         ):
-            loader = SimpleNamespace(context=object(), download_profiles=Mock())
+            loader = SimpleNamespace(context=object(), download_profiles=Mock(), compress_json=True)
             instaloader_cls.return_value = loader
 
             instagram.harvest(accounts=["nasa"], sleep_seconds=0)
@@ -120,7 +122,7 @@ class InstagramDownloadTests(unittest.TestCase):
             (account_dir / "partial-carousel" / "image_01.jpg").parent.mkdir(parents=True)
             (account_dir / "partial-carousel" / "image_01.jpg").touch()
 
-            loader = SimpleNamespace(context=object(), download_profiles=Mock())
+            loader = SimpleNamespace(context=object(), download_profiles=Mock(), compress_json=True)
 
             with (
                 patch.object(instagram.instaloader, "Instaloader", return_value=loader),
@@ -155,7 +157,7 @@ class InstagramDownloadTests(unittest.TestCase):
             patch.object(instagram.config, "SOURCES_DIR", Path(tmpdir)),
             patch.object(
                 instagram.instaloader, "Instaloader",
-                return_value=SimpleNamespace(context=object(), download_profiles=Mock()),
+                return_value=SimpleNamespace(context=object(), download_profiles=Mock(), compress_json=True),
             ),
             patch.object(
                 instagram.instaloader.Profile, "from_username",
@@ -167,6 +169,43 @@ class InstagramDownloadTests(unittest.TestCase):
             instagram.harvest(accounts=["nasa"], sleep_seconds=0)
 
         organize.assert_called_once_with(Path(tmpdir) / "instagram" / "nasa")
+
+    def test_removes_stray_profile_level_metadata_json_after_harvest(self) -> None:
+        # Instaloader.download_profiles() unconditionally drops a
+        # "<username>_<userid>.json[.xz]" profile-level metadata file in the
+        # account root whenever save_metadata is on (which it always is here,
+        # since that same flag also produces the per-post metadata this
+        # project relies on) -- harvest() should clean that stray file up.
+        for compress_json, ext in ((True, ".json.xz"), (False, ".json")):
+            with self.subTest(compress_json=compress_json):
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    sources_dir = Path(tmpdir)
+                    account_dir = sources_dir / "instagram" / "nasa"
+                    account_dir.mkdir(parents=True)
+                    stray = account_dir / f"nasa_42{ext}"
+
+                    def fake_download_profiles(*args, **kwargs) -> None:
+                        stray.touch()
+
+                    loader = SimpleNamespace(
+                        context=object(),
+                        download_profiles=Mock(side_effect=fake_download_profiles),
+                        compress_json=compress_json,
+                    )
+
+                    with (
+                        patch.object(instagram.instaloader, "Instaloader", return_value=loader),
+                        patch.object(
+                            instagram.instaloader.Profile, "from_username",
+                            return_value=_FakeProfile("nasa"),
+                        ),
+                        patch.object(instagram.time, "sleep"),
+                        patch.object(instagram.config, "SOURCES_DIR", sources_dir),
+                        patch.object(instagram.storage, "organize_instagram_account"),
+                    ):
+                        instagram.harvest(accounts=["nasa"], sleep_seconds=0)
+
+                    self.assertFalse(stray.exists())
 
 
 class YoutubeTiktokDownloadTests(unittest.TestCase):

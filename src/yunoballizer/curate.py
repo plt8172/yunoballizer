@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import lzma
 import os
 import re
 from pathlib import Path
@@ -11,7 +10,7 @@ from shutil import copy2
 
 from . import config
 from .profile import PROFILE_FILENAME
-from .storage import MEDIA_EXTS, review_link_name
+from .storage import MEDIA_EXTS, find_caption, review_link_name
 
 logger = logging.getLogger("yunoballizer.curate")
 
@@ -94,24 +93,6 @@ Is this user likely to enjoy this post? Answer with a single word, "yes" or "no"
         return False
 
 
-def _find_caption(media_path: Path) -> str:
-    """A post's caption lives beside its media, in the same bundle directory."""
-    post_dir = media_path.parent
-    caption_path = post_dir / "caption.txt"
-    if caption_path.exists():
-        return caption_path.read_text(encoding="utf-8", errors="ignore")
-
-    metadata_path = post_dir / "metadata.json.xz"
-    if metadata_path.exists():
-        try:
-            with lzma.open(metadata_path) as f:
-                data = json.loads(f.read())
-        except Exception:
-            return ""
-        return data.get("description") or data.get("title") or ""
-    return ""
-
-
 def run() -> None:
     profile = _load_profile()
     log = _load_log()
@@ -128,7 +109,7 @@ def run() -> None:
             if key in log:
                 continue
 
-            caption = _find_caption(media_path)
+            caption = find_caption(media_path)
             score = _rule_score(caption, profile)
             checked += 1
 

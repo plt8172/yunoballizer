@@ -68,6 +68,8 @@ yuno fetch                # Uses the active saved session. Adds saved-post autho
 yuno expand               # No login required. Adds @mentions from downloaded Instagram captions
 yuno profile              # Build/refresh a content profile from downloaded Instagram captions
 yuno curate               # Curate downloaded posts against the content profile
+yuno select                # Browse review/ one item at a time: arrows to move, s to select, o to open natively
+yuno export                # Copy/hardlink everything you've selected into selected/
 yuno all                  # download + curate (cron entry point)
 
 yuno auth login               # Open a login window driving Chrome (default); falls back to cookie import if that fails
@@ -179,12 +181,14 @@ Using the defaults, the layout looks like this:
 │   └── other/<extractor>/<uploader>/<post-id>/
 ├── review/               # flat symlinks into sources/, for browsing
 ├── curated/              # copies of posts `yuno curate` decided to keep
+├── selected/             # real files (hardlinked/copied) for posts you picked with `yuno select`
 └── derived/
     └── taste_profile.json
 
 ~/.local/state/yunoballizer/
 ├── archives/             # yt-dlp download-archive files (dedup)
 ├── curation_log.json
+├── selection_log.json
 └── logs/
 
 ~/.config/yunoballizer/
@@ -218,9 +222,42 @@ filename, is the source of truth; nothing parses link names back into
 metadata. Deleting a link never touches the original file, and deleting
 `review/` entirely is safe -- `yuno download` regenerates it from `sources/`
 every run. Profile pictures are never downloaded in the first place, so they
-never show up here either. There's no selected/rejected/pending split; if you
-want a curated subset, use `yuno curate`, which copies posts it keeps into
-`curated/`.
+never show up here either. If you want an automatically curated subset, use
+`yuno curate`, which copies posts it keeps into `curated/`.
+
+**`yuno select`** is for manually picking favorites instead of relying on
+automatic curation. It shows one item from `review/` at a time -- account,
+image, caption -- rather than a list-plus-preview split: `<-`/`->` move to
+the previous/next item, `s` toggles it as selected, `o` opens it in your
+OS's default viewer/player (for a closer look or if you need to play a
+video), and Enter/`q` finishes the session. Whatever you selected gets
+recorded into `selection_log.json` as a plain manifest. review/'s symlinks
+are still just a disposable browsing index, so selection state deliberately
+lives outside the filesystem instead of being encoded via symlinks --
+nothing about selecting a file changes `review/` or `sources/`. Run
+`yuno export` afterwards to materialize the manifest into `selected/`: real
+files (hardlinked when `selected/` shares a filesystem with `sources/`,
+copied otherwise), not symlinks, so `selected/` works with any downstream
+tool, sync client, or mobile app without special-casing links.
+
+One item at a time is a deliberate choice, not just simplicity for its own
+sake: an earlier version used [fzf](https://github.com/junegunn/fzf) with a
+live preview pane, but a navigable list and a concurrently-rendered image
+fighting over the same terminal caused frequent, hard-to-avoid corruption
+in practice (the list reads keystrokes from stdin while the image tool
+queries the terminal for cursor position over that same stdin). Rendering
+one full-width item at a time means only one process ever touches the
+terminal, and it always finishes before the next keypress is read -- so
+`yuno select` has no `fzf` dependency at all.
+
+The picker previews each item with [`viu`](https://github.com/atanunq/viu)
+-- videos show a single representative frame (extracted with `ffmpeg`, if
+installed) rather than playing back in the terminal, since that turned out
+to be the simplest thing that works identically across
+macOS/Windows/Linux without heavier dependencies. `viu` is required for
+`yuno select`; `ffmpeg` is optional (video previews just fall back to a
+placeholder line without it). Both are invoked as subprocesses only, never
+linked against, so their own licenses don't affect this project's.
 
 ## Uninstalling
 

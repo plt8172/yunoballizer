@@ -10,6 +10,7 @@ import zlib
 from . import auth, config, expand, fetch, prune, storage
 from . import profile as profile_mod
 from . import curate as curate_mod
+from . import select as select_mod
 from .downloaders import instagram, tiktok, youtube
 from .downloaders import urls as urls_mod
 
@@ -96,6 +97,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("expand", help="No login required. Expands Instagram accounts.txt from downloaded caption mentions")
     sub.add_parser("profile", help="Build/refresh the content profile from downloaded Instagram captions")
     sub.add_parser("curate", help="Curate new posts against the content profile")
+
+    sub.add_parser(
+        "select",
+        help="Browse review/ one item at a time (arrows to move, s to select/deselect, "
+             "o to open in your OS's default viewer/player, Enter/q to finish)",
+    )
+    sub.add_parser("export", help="Copy/hardlink selected media into selected/")
+
     sub.add_parser("all", help="Run download then curate (cron entry point)")
 
     prune_parser = sub.add_parser(
@@ -174,6 +183,10 @@ def main(argv: list[str] | None = None) -> None:
         profile_mod.build()
     elif args.command == "curate":
         curate_mod.run()
+    elif args.command == "select":
+        select_mod.run_select()
+    elif args.command == "export":
+        select_mod.run_export()
     elif args.command == "all":
         _run_download()
         if (config.DERIVED_DIR / profile_mod.PROFILE_FILENAME).exists():

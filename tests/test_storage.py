@@ -112,6 +112,34 @@ class OrganizeYtdlpTests(unittest.TestCase):
                 self.assertTrue((root / uploader / video_id / "metadata.json.xz").exists())
 
 
+class FindCaptionTests(unittest.TestCase):
+    def test_reads_sibling_caption_txt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            post_dir = Path(tmpdir)
+            media = post_dir / "image_01.jpg"
+            media.touch()
+            (post_dir / "caption.txt").write_text("hello world", encoding="utf-8")
+
+            self.assertEqual(storage.find_caption(media), "hello world")
+
+    def test_falls_back_to_compressed_metadata_description(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            post_dir = Path(tmpdir)
+            media = post_dir / "video.mp4"
+            media.touch()
+            (post_dir / "metadata.json.xz").write_bytes(
+                lzma.compress(json.dumps({"description": "video caption"}).encode("utf-8"))
+            )
+
+            self.assertEqual(storage.find_caption(media), "video caption")
+
+    def test_returns_empty_string_when_nothing_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media = Path(tmpdir) / "video.mp4"
+            media.touch()
+            self.assertEqual(storage.find_caption(media), "")
+
+
 class ReviewLinkTests(unittest.TestCase):
     def test_review_link_name_embeds_identifying_parts(self) -> None:
         name = storage.review_link_name(Path("instagram/nasa/ShortcodeA/image_01.jpg"))

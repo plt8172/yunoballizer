@@ -7,7 +7,7 @@ import logging
 import sys
 import zlib
 
-from . import config, expand, fetch, prune, storage
+from . import auth, config, expand, fetch, prune, storage
 from . import profile as profile_mod
 from . import curate as curate_mod
 from .downloaders import instagram, tiktok, youtube
@@ -47,12 +47,52 @@ def build_parser() -> argparse.ArgumentParser:
              "Must start with '@' for an account, e.g. '@nasa' (hashtag support may come later)",
     )
 
-    fetch_parser = sub.add_parser("fetch", help="Requires login. Adds saved-post authors to Instagram accounts.txt")
-    fetch_parser.add_argument(
-        "-b", "--browser", default=fetch.DEFAULT_BROWSER,
-        help=f"Browser to import the Instagram login session's cookies from (default: {fetch.DEFAULT_BROWSER}). "
-             "Avoids Instagram's automated-login checkpoint by reusing an already-logged-in session.",
+    sub.add_parser(
+        "fetch",
+        help="Requires an active session (see `auth login`). Adds saved-post authors to Instagram accounts.txt",
     )
+
+    auth_parser = sub.add_parser("auth", help="Manage saved Instagram login sessions used by fetch")
+    auth_sub = auth_parser.add_subparsers(dest="auth_command", required=True)
+
+    login_parser = auth_sub.add_parser(
+        "login", help="Log in to Instagram (opens a browser window) and save the session"
+    )
+    login_parser.add_argument(
+        "-b", "--browser", default=auth.DEFAULT_BROWSER,
+        help=f"Browser to use (default: {auth.DEFAULT_BROWSER}). For 'chrome' or 'edge', opens a "
+             "dedicated login window driving that already-installed browser directly (no download "
+             "needed) -- the better way to add another account, since it never touches an everyday "
+             "browser's own session. For any other value, or if that window can't be opened, falls "
+             "back to importing the session already active in that browser instead.",
+    )
+    login_parser.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip the confirmation prompt and save the detected session immediately",
+    )
+
+    status_parser = auth_sub.add_parser(
+        "status", help="List saved Instagram sessions and show which one is active"
+    )
+    status_parser.add_argument(
+        "-c", "--check", action="store_true",
+        help="Verify each saved session is still logged in (slower: one request per session)",
+    )
+
+    switch_parser = auth_sub.add_parser("switch", help="Switch the active Instagram session")
+    switch_parser.add_argument(
+        "username", nargs="?", default=None,
+        help="Instagram username of a previously saved session (default: cycle to the next saved session)",
+    )
+
+    logout_parser = auth_sub.add_parser(
+        "logout", help="Remove one or more saved Instagram sessions (defaults to the active one)"
+    )
+    logout_parser.add_argument(
+        "username", nargs="*",
+        help="Instagram username(s) to remove (default: just the active session)",
+    )
+
     sub.add_parser("expand", help="No login required. Expands Instagram accounts.txt from downloaded caption mentions")
     sub.add_parser("profile", help="Build/refresh the content profile from downloaded Instagram captions")
     sub.add_parser("curate", help="Curate new posts against the content profile")
@@ -111,7 +151,16 @@ def main(argv: list[str] | None = None) -> None:
     config.ensure_config()
 
     if args.command == "fetch":
-        fetch.run(browser=args.browser)
+        fetch.run()
+    elif args.command == "auth":
+        if args.auth_command == "login":
+            auth.login(browser=args.browser, assume_yes=args.yes)
+        elif args.auth_command == "status":
+            auth.status(check=args.check)
+        elif args.auth_command == "switch":
+            auth.switch(args.username)
+        elif args.auth_command == "logout":
+            auth.logout(args.username)
     elif args.command == "expand":
         _run_expand()
     elif args.command == "download":

@@ -290,6 +290,31 @@ class RenderItemTests(unittest.TestCase):
             printed = "\n".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
             self.assertIn("hello world", printed)
 
+    def test_image_is_rendered_before_the_header(self) -> None:
+        """viu's requested height isn't guaranteed to match what actually
+        gets drawn, so the image is printed first: if it renders taller than
+        expected and forces a scroll, only the image's top scrolls away --
+        whatever's printed last (the header) always stays on screen."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir, media = self._item(Path(tmpdir), caption=None)
+            order = []
+
+            def fake_print(*args, **kwargs):
+                # Ignore the initial clear-screen escape sequence -- only
+                # track prints of actual visible text (the header).
+                if args and args[0] != "\x1b[2J\x1b[H":
+                    order.append("print")
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(select, "render_preview", side_effect=lambda *a, **k: order.append("image")),
+                patch("builtins.print", side_effect=fake_print),
+            ):
+                select._render_item(media, 0, 1, set())
+
+            self.assertEqual(order[0], "image")
+            self.assertIn("print", order)
+
     def _item(self, root: Path, caption: str | None) -> tuple[Path, Path]:
         sources_dir = root / "sources"
         post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
@@ -329,8 +354,8 @@ class RenderItemTests(unittest.TestCase):
                 select._render_item(media, 0, 1, set())
 
             height = mock_preview.call_args.kwargs["height"]
-            # 4 fixed rows + caption line + its trailing blank line.
-            self.assertEqual(height, 40 - 6)
+            # 4 fixed rows + one line for the caption.
+            self.assertEqual(height, 40 - 5)
 
     def test_long_caption_is_truncated_to_a_single_line(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

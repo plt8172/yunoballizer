@@ -114,22 +114,24 @@ def _render_item(path: Path, index: int, total: int, marked: set[Path]) -> None:
     caption = find_caption(resolved).strip().replace("\n", " ")
     caption_line = caption[: max(columns - 1, 10)] if caption else ""
 
-    # Every row besides the image itself: header, a blank line on each side
-    # of the image, the footer, plus the caption and its trailing blank line
-    # if there is one. Sizing the image to anything less strict than this
-    # pushes the total past the terminal's row count, which forces a scroll
-    # that carries the header (printed first) right off the top of the
-    # screen -- that's what showed up as the header "flashing" and vanishing.
-    reserved = 4 + (2 if caption_line else 0)
+    # This budget makes the image a sensible size in the common case, but
+    # it's not what keeps the header on screen -- viu's requested -h isn't
+    # guaranteed to match what actually gets drawn (graphics protocols need
+    # an accurate pixel-per-cell size from the terminal, which isn't always
+    # reported correctly). So the image is printed *first*, before anything
+    # else: if it renders taller than expected and forces a scroll, only the
+    # top of the image scrolls out of view. Whatever's printed last (header,
+    # caption, footer) always stays on screen regardless of how tall the
+    # image actually turns out to be.
+    reserved = 4 + (1 if caption_line else 0)
     height = max(shutil.get_terminal_size().lines - reserved, 5)
 
-    print(header)
-    print()
     render_preview(path, height=height)
     print()
+    print(header)
     if caption_line:
         print(caption_line)
-        print()
+    print()
     print(footer)
     sys.stdout.flush()
 

@@ -33,6 +33,7 @@ def download(
     opts = {
         "download_archive": str(archive),
         "writeinfojson": True,
+        "allow_playlist_files": False,
         "outtmpl": output_templates,
         "ignoreerrors": True,
         "sleep_interval_requests": 2,

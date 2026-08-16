@@ -26,12 +26,27 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 
 import instaloader
 
 from .. import config, storage
 
 logger = logging.getLogger("yunoballizer.instagram")
+
+
+def _remove_profile_metadata_json(
+    account_dir: Path, profile: instaloader.Profile, loader: instaloader.Instaloader
+) -> None:
+    # Instaloader.download_profiles() unconditionally writes a
+    # "<username>_<userid>.json[.xz]" profile-level metadata file whenever
+    # save_metadata is on -- and save_metadata can't just be turned off,
+    # since it's the same flag that produces the per-post metadata this
+    # project relies on. Delete the stray profile-level file it leaves in
+    # the account root.
+    ext = ".json.xz" if loader.compress_json else ".json"
+    stray = account_dir / f"{profile.username}_{profile.userid}{ext}"
+    stray.unlink(missing_ok=True)
 
 
 def harvest(
@@ -92,6 +107,7 @@ def harvest(
                 max_count=skip + limit,
                 post_filter=include_post,
             )
+            _remove_profile_metadata_json(account_dir, profile, loader)
         except instaloader.InstaloaderException as e:
             logger.error("Failed to harvest %s: %s", account, e)
         finally:

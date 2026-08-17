@@ -11,15 +11,16 @@ authors of posts you saved. Fetch stores no media or captions; anonymous account
 crawling handles all downloads.
 
 ```
-[once/switch]         yuno auth login -> imports & saves an Instagram session
-                                              |
-[manual, uses saved   yuno fetch      -> adds saved-post authors to accounts.txt
- session]                                    |
-[frequent, no login]  yuno download   -> downloads accounts.txt + urls.txt across
-                                         Instagram/YouTube/TikTok
-                                              |
-[manual, no login]    yuno expand     -> adds @mentions found in downloaded
-                                         Instagram captions to accounts.txt
+[once/switch]         yuno auth login | imports & saves an Instagram session
+                                      |
+[manual, login]       yuno fetch      | adds saved-post authors to accounts.txt
+                                      |
+[frequent, no login]  yuno download   | downloads accounts.txt + urls.txt across
+                                      | ig/yt and tiktok
+[manual, no login]    yuno select     | a visual tool to select posts/videos manually
+                                      |
+[manual, no login]    yuno expand     | adds @mentions found in downloaded
+                                      | captions to accounts.txt
 ```
 
 `yuno profile` builds a content profile from downloaded Instagram captions,
@@ -60,18 +61,6 @@ Fill in the account list files:
 ## Usage
 
 ```bash
-yuno download            # No login required. Crawls accounts.txt + urls.txt (Instagram/YouTube/TikTok)
-yuno download @nasa      # Harvest a single account across all three platforms instead of the configured lists
-yuno download -l 5       # Cap harvest at 5 posts per account (default: 20)
-yuno download -s 5 -l 10 # Skip the newest 5 posts, then harvest the next 10 per account
-yuno fetch                # Uses the active saved session. Adds saved-post authors to Instagram accounts.txt; downloads nothing
-yuno expand               # No login required. Adds @mentions from downloaded Instagram captions
-yuno profile              # Build/refresh a content profile from downloaded Instagram captions
-yuno curate               # Curate downloaded posts against the content profile
-yuno select                # Browse review/ one item at a time: arrows to move, s to select, o to open natively
-yuno export                # Copy/hardlink everything you've selected into selected/
-yuno all                  # download + curate (cron entry point)
-
 yuno auth login               # Open a login window driving Chrome (default); falls back to cookie import if that fails
 yuno auth login -b edge       # Same, driving Edge instead
 yuno auth login -b firefox    # Not chrome/edge: skips the login window, imports cookies from that browser instead
@@ -81,10 +70,102 @@ yuno auth status -c           # Also verify each saved session is still logged i
 yuno auth switch <user>       # Switch which saved session `fetch` uses, without touching the browser
 yuno auth switch              # No user given: cycle to the next saved session (like `gh auth switch`)
 yuno auth logout [<user>...]  # Remove one or more saved sessions (defaults to just the active one)
+
+yuno fetch                # Uses the active saved session. Adds saved-post authors to Instagram accounts.txt; downloads nothing
+
+yuno download            # No login required. Crawls accounts.txt + urls.txt (Instagram/YouTube/TikTok)
+yuno download @nasa      # Harvest a single account across all three platforms instead of the configured lists
+yuno download -l 5       # Cap harvest at 5 posts per account (default: 20)
+yuno download -s 5 -l 10 # Skip the newest 5 posts, then harvest the next 10 per account
+
+yuno select                # Browse review/ one item at a time: s to select, c to save a larp template, o to open natively
+yuno export                # Copy/hardlink everything you've selected into selected/
+
+yuno expand               # No login required. Adds @mentions from downloaded Instagram captions
+yuno profile              # Build/refresh a content profile from downloaded Instagram captions
+yuno curate               # Curate downloaded posts against the content profile
+
+yuno all                  # download + curate (cron entry point)
+
+yuno larp --style casual  # Generate comment/caption text from a saved style's templates
 ```
 
 `-s`/`--skip` and `-l`/`--limit` mean the same thing across all three
 platforms: skip the N most recent posts per account, then harvest the next L.
+
+### `yuno larp`: comment/caption text generation
+
+`yuno larp` generates text for comments or captions in the style of your
+own material. It sends your saved example templates as few-shot examples
+to an LLM and asks it to write one new example in the same voice -- by
+default a free-tier Llama model via [Groq](https://console.groq.com)'s
+API, called over plain HTTPS with just the Python standard library (no
+new required dependency), but you do need a free `YUNOBALLIZER_API_KEY`.
+
+Templates are grouped into named styles (aliases) so different
+voices/formats -- a chatty travel-caption style vs. a terse one-liner
+style, say -- don't blend into an incoherent average. Each style is its
+own file under `$CONFIG_DIR/larp/styles/<name>.txt` (blank-line-separated
+template blocks, `#` for comments; editing it directly works too).
+
+Templates get there two ways: the `add` subcommand below, or `yuno
+select`'s `c` key, which files the item you're currently looking at --
+its own downloaded caption, not something you type -- into a style you
+pick. A separate action from `s` (picking favorites), not tied to whether
+the current item is selected. The style prompt there tab-completes over
+your existing styles (via `readline`, so not on Windows without
+`pyreadline`) -- keep typing to create a new one instead.
+
+```bash
+export YUNOBALLIZER_API_KEY=gsk_...   # free Groq key: https://console.groq.com/keys
+
+yuno larp add casual "오늘도 열심히 달렸다 #daily #run"   # save a template under the "casual" style
+yuno larp list                                            # list saved styles and their template counts
+yuno larp list casual                                     # list templates within a style, by index
+yuno larp show casual 0                                   # show one template's full content
+yuno larp remove casual 0                                 # remove a template by index
+yuno larp rename casual laid-back                         # rename a style (its alias)
+yuno larp delete laid-back                                # delete a style and all its templates
+
+yuno larp --style casual         # generate one text from the "casual" style
+yuno larp --style casual -n 5    # generate 5
+yuno larp --model llama-3.1-8b-instant   # faster, smaller model
+yuno larp --style casual --language English   # keep the style, change the output language
+```
+
+`--style` can be omitted if you only have one saved style (it's used
+automatically); with two or more styles saved, `--style` is required so
+styles never mix silently. Model: `--model`, then `$YUNOBALLIZER_MODEL`,
+then `llama-3.3-70b-versatile` as the default.
+
+`--language`/`-l` keeps the chosen style's voice and format but asks the
+model to write the output in a different language than the saved
+examples -- e.g. templates written in Korean, generated in English. Leave
+it unset to just match whatever language the examples themselves are in.
+
+Groq's free tier has rate limits (requests per minute/day); for occasional
+personal use this comfortably fits, but if you hit one, `yuno larp` tells
+you directly instead of failing silently. Your API key is read only from
+`YUNOBALLIZER_API_KEY` (never a CLI flag, so it never ends up in shell
+history), and never leaves your machine except in the request itself --
+yunoballizer doesn't store or log it.
+
+Any provider that speaks the same OpenAI-compatible chat completions
+format works, not just Groq -- OpenRouter, Together AI, Fireworks, a
+local vLLM/LM Studio server, etc. Point `--api-base` (or
+`$YUNOBALLIZER_API_BASE`) at that provider's endpoint, pass `--model` for
+its model name, and set `YUNOBALLIZER_API_KEY` to its key:
+
+```bash
+export YUNOBALLIZER_API_KEY=sk-or-...
+yuno larp --style casual \
+  --api-base https://openrouter.ai/api/v1/chat/completions \
+  --model meta-llama/llama-3.1-8b-instruct:free
+```
+
+Providers with a genuinely different request format (not OpenAI-style
+chat completions -- e.g. Anthropic's Messages API, Ollama's native
+`/api/generate`) aren't supported this way.
 
 ### Instagram login (`yuno auth`)
 
@@ -198,7 +279,10 @@ Using the defaults, the layout looks like this:
 │   └── sessions/            # one file per `yuno auth login`, named <username>.session
 ├── youtube/accounts.txt
 ├── tiktok/accounts.txt
-└── urls.txt
+├── urls.txt
+└── larp/styles/
+    ├── casual.txt
+    └── formal.txt
 ```
 
 Session files hold cookies, not your password, and are written `0600`
@@ -239,6 +323,14 @@ nothing about selecting a file changes `review/` or `sources/`. Run
 files (hardlinked when `selected/` shares a filesystem with `sources/`,
 copied otherwise), not symlinks, so `selected/` works with any downstream
 tool, sync client, or mobile app without special-casing links.
+
+`c` files the current item's own downloaded caption as a `yuno larp`
+template: it prompts for which style to save it under (existing ones are
+listed for reference), then appends the caption to that style's file, same
+as `yuno larp add`. Nothing to type -- if the item has no caption there's
+nothing to save. It's a completely separate action from `s` -- it never
+touches `selection_log.json`, doesn't require the current item to be
+selected, and selecting an item never writes a template.
 
 One item at a time is a deliberate choice, not just simplicity for its own
 sake: an earlier version used [fzf](https://github.com/junegunn/fzf) with a

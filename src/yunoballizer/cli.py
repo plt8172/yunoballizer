@@ -8,6 +8,7 @@ import sys
 import zlib
 
 from . import auth, config, expand, fetch, prune, storage
+from . import larp as larp_mod
 from . import profile as profile_mod
 from . import curate as curate_mod
 from . import select as select_mod
@@ -107,6 +108,68 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("all", help="Run download then curate (cron entry point)")
 
+    larp_parser = sub.add_parser(
+        "larp",
+        help="Generate comment/caption text from per-style saved templates via Groq's "
+             "free-tier LLM API",
+    )
+    larp_parser.add_argument(
+        "-s", "--style", default=None,
+        help="Which saved style to draw from (see `yuno larp list`). Required if more "
+             "than one style is saved, to avoid mixing styles together",
+    )
+    larp_parser.add_argument(
+        "-n", "--count", type=int, default=1, help="Number of texts to generate (default: 1)"
+    )
+    larp_parser.add_argument(
+        "--model", default=None,
+        help="Model name for the target API. Defaults to $YUNOBALLIZER_MODEL, or "
+             "'llama-3.3-70b-versatile' if unset",
+    )
+    larp_parser.add_argument(
+        "--api-base", default=None,
+        help="OpenAI-compatible chat completions endpoint URL. Defaults to "
+             "$YUNOBALLIZER_API_BASE, or Groq's API if unset. Any provider with the "
+             "same request/response shape works (OpenRouter, Together, a local "
+             "vLLM/LM Studio server, etc.) -- also pass --model and set "
+             "YUNOBALLIZER_API_KEY to that provider's key",
+    )
+    larp_parser.add_argument(
+        "--timeout", type=int, default=30,
+        help="Request timeout in seconds (default: 30)",
+    )
+    larp_parser.add_argument(
+        "-l", "--language", default=None,
+        help="Language to generate in (e.g. 'English', 'Korean'), overriding the "
+             "examples' own language while keeping their style. Default: whatever "
+             "language the style's examples are already in",
+    )
+    larp_sub = larp_parser.add_subparsers(dest="larp_command")
+    larp_add_parser = larp_sub.add_parser(
+        "add", help="Save a new template under a style (also doable via `yuno select`'s 'c' key)"
+    )
+    larp_add_parser.add_argument("style", help="Style name (alias) to save the template under, e.g. 'casual'")
+    larp_add_parser.add_argument("text", help="Template text to save")
+    larp_list_parser = larp_sub.add_parser(
+        "list", help="List saved styles, or templates within a style if one is given"
+    )
+    larp_list_parser.add_argument("style", nargs="?", default=None, help="Style name to list templates for")
+    larp_show_parser = larp_sub.add_parser(
+        "show", help="Show the full content of one template (see `yuno larp list <style>` for indices)"
+    )
+    larp_show_parser.add_argument("style", help="Style name the template belongs to")
+    larp_show_parser.add_argument("index", type=int)
+    larp_remove_parser = larp_sub.add_parser(
+        "remove", help="Remove a saved template by index (see `yuno larp list <style>`)"
+    )
+    larp_remove_parser.add_argument("style", help="Style name the template belongs to")
+    larp_remove_parser.add_argument("index", type=int)
+    larp_rename_parser = larp_sub.add_parser("rename", help="Rename a style (its alias)")
+    larp_rename_parser.add_argument("old", help="Current style name")
+    larp_rename_parser.add_argument("new", help="New style name")
+    larp_delete_parser = larp_sub.add_parser("delete", help="Delete a style and all of its templates")
+    larp_delete_parser.add_argument("style", help="Style name to delete")
+
     prune_parser = sub.add_parser(
         "prune",
         help="Remove this app's config/data/log directories (does not remove the installed package)",
@@ -134,6 +197,57 @@ def _run_download(
 def _run_expand() -> None:
     added_caption = expand.scan_caption_mentions()
     logger.info("New Instagram accounts added from caption mentions: %d", added_caption)
+
+
+def _run_larp(args: argparse.Namespace) -> None:
+    if args.larp_command == "add":
+        try:
+            larp_mod.add_template(args.style, args.text)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        logger.info("Template saved under style %r.", args.style)
+    elif args.larp_command == "list":
+        if args.style is None:
+            styles = larp_mod.list_styles()
+            if not styles:
+                print("No saved styles.")
+            for style in styles:
+                count = len(larp_mod.read_templates(style))
+                print(f"{style} ({count} template{'s' if count != 1 else ''})")
+        else:
+            templates = larp_mod.read_templates(args.style)
+            if not templates:
+                print(f"No saved templates for style {args.style!r}.")
+            for i, template in enumerate(templates):
+                print(f"[{i}] {template}")
+    elif args.larp_command == "show":
+        try:
+            print(larp_mod.get_template(args.style, args.index))
+        except IndexError as exc:
+            raise SystemExit(str(exc))
+    elif args.larp_command == "remove":
+        try:
+            removed = larp_mod.remove_template(args.style, args.index)
+        except IndexError as exc:
+            raise SystemExit(str(exc))
+        logger.info("Removed template [%d] from style %r: %s", args.index, args.style, removed)
+    elif args.larp_command == "rename":
+        larp_mod.rename_style(args.old, args.new)
+        logger.info("Renamed style %r to %r.", args.old, args.new)
+    elif args.larp_command == "delete":
+        larp_mod.delete_style(args.style)
+        logger.info("Deleted style %r.", args.style)
+    else:
+        texts = larp_mod.generate(
+            style=args.style,
+            count=args.count,
+            model=args.model,
+            api_base=args.api_base,
+            language=args.language,
+            timeout=args.timeout,
+        )
+        for text in texts:
+            print(text)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -187,6 +301,8 @@ def main(argv: list[str] | None = None) -> None:
         select_mod.run_select()
     elif args.command == "export":
         select_mod.run_export()
+    elif args.command == "larp":
+        _run_larp(args)
     elif args.command == "all":
         _run_download()
         if (config.DERIVED_DIR / profile_mod.PROFILE_FILENAME).exists():

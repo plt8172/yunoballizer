@@ -74,9 +74,11 @@ class EnsureConfigTests(unittest.TestCase):
                 patch.object(config, "REVIEW_DIR", data_dir / "review"),
                 patch.object(config, "CURATED_DIR", data_dir / "curated"),
                 patch.object(config, "DERIVED_DIR", data_dir / "derived"),
+                patch.object(config, "SELECTED_DIR", data_dir / "selected"),
                 patch.object(config, "ARCHIVE_DIR", state_dir / "archives"),
                 patch.object(config, "LOG_DIR", state_dir / "logs"),
                 patch.object(config, "CURATION_LOG_PATH", state_dir / "curation_log.json"),
+                patch.object(config, "LARP_STYLES_DIR", config_dir / "larp" / "styles"),
             ):
                 config.ensure_config()
 
@@ -84,8 +86,10 @@ class EnsureConfigTests(unittest.TestCase):
             self.assertTrue((data_dir / "review").is_dir())
             self.assertTrue((data_dir / "curated").is_dir())
             self.assertTrue((data_dir / "derived").is_dir())
+            self.assertTrue((data_dir / "selected").is_dir())
             self.assertTrue((state_dir / "archives").is_dir())
             self.assertTrue((state_dir / "logs").is_dir())
+            self.assertTrue((config_dir / "larp" / "styles").is_dir())
             self.assertTrue((config_dir / "instagram" / "accounts.txt").exists())
             self.assertTrue((config_dir / "youtube" / "accounts.txt").exists())
             self.assertTrue((config_dir / "tiktok" / "accounts.txt").exists())

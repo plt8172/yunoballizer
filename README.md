@@ -38,9 +38,8 @@ Installing registers both the `yunoballizer` and `yuno` commands on PATH
 
 `yuno curate`'s optional AI-assisted judgment (used when rule-based
 scoring is ambiguous) uses the same LLM setup as `yuno larp` -- no extra
-install, no separate key. See the [`yuno larp`](#yuno-larp-commentcaption-text-generation)
-section below for how to set `YUNOBALLIZER_API_KEY` (and optionally
-`YUNOBALLIZER_MODEL`/`YUNOBALLIZER_API_BASE`).
+install, no separate key. Run `yuno brain config` once to set it up; see
+the [`yuno brain`](#yuno-brain-ai-provider-profiles) section below.
 
 ## First-time setup
 
@@ -69,6 +68,12 @@ yuno auth status -c           # Also verify each saved session is still logged i
 yuno auth switch <user>       # Switch which saved session `fetch` uses, without touching the browser
 yuno auth switch              # No user given: cycle to the next saved session (like `gh auth switch`)
 yuno auth logout [<user>...]  # Remove one or more saved sessions (defaults to just the active one)
+
+yuno brain config groq   # Interactively save a named AI provider profile (API key hidden) and activate it
+yuno brain               # Show the active profile
+yuno brain list          # List saved profiles, marking the active one with *
+yuno brain switch <name> # Switch which saved profile larp/curate use
+yuno brain remove <name> # Delete a saved profile
 
 yuno fetch                # Uses the active saved session. Adds saved-post authors to Instagram accounts.txt; downloads nothing
 
@@ -99,7 +104,8 @@ own material. It sends your saved example templates as few-shot examples
 to an LLM and asks it to write one new example in the same voice -- by
 default a free-tier Llama model via [Groq](https://console.groq.com)'s
 API, called over plain HTTPS with just the Python standard library (no
-new required dependency), but you do need a free `YUNOBALLIZER_API_KEY`.
+new required dependency), but you do need to run `yuno brain config`
+once first -- see [`yuno brain`](#yuno-brain-ai-provider-profiles) below.
 
 Templates are grouped into named styles (aliases) so different
 voices/formats -- a chatty travel-caption style vs. a terse one-liner
@@ -116,7 +122,7 @@ your existing styles (via `readline`, so not on Windows without
 `pyreadline`) -- keep typing to create a new one instead.
 
 ```bash
-export YUNOBALLIZER_API_KEY=gsk_...   # free Groq key: https://console.groq.com/keys
+yuno brain config   # first time only: save a free Groq key (https://console.groq.com/keys)
 
 yuno larp add casual "오늘도 열심히 달렸다 #daily #run"   # save a template under the "casual" style
 yuno larp list                                            # list saved styles and their template counts
@@ -133,8 +139,8 @@ yuno larp --style casual --language English   # keep the style, change the outpu
 
 `--style` can be omitted if you only have one saved style (it's used
 automatically); with two or more styles saved, `--style` is required so
-styles never mix silently. Model: `--model`, then `$YUNOBALLIZER_MODEL`,
-then `llama-3.3-70b-versatile` as the default.
+styles never mix silently. Model: `--model`, then whatever's configured
+(see below), then `llama-3.3-70b-versatile` as the built-in default.
 
 `--language`/`-l` keeps the chosen style's voice and format but asks the
 model to write the output in a different language than the saved
@@ -143,15 +149,58 @@ it unset to just match whatever language the examples themselves are in.
 
 Groq's free tier has rate limits (requests per minute/day); for occasional
 personal use this comfortably fits, but if you hit one, `yuno larp` tells
-you directly instead of failing silently. Your API key is read only from
-`YUNOBALLIZER_API_KEY` (never a CLI flag, so it never ends up in shell
-history), and never leaves your machine except in the request itself --
-yunoballizer doesn't store or log it.
+you directly instead of failing silently.
 
-Instead of `export`ing these in your shell profile, you can put them in
-`$CONFIG_DIR/.env` (`KEY=value`, one per line, `#` comments, quotes around
-the value optional) -- it's read once at startup, and anything already
-`export`ed in your shell always takes priority over the file:
+### `yuno brain`: AI provider profiles
+
+`yuno larp` and `yuno curate` share one AI provider setup, managed like
+`yuno auth` manages Instagram sessions: save one or more named profiles,
+switch between them, and whichever is active is what larp/curate use --
+no CLI flags, no shell exports required.
+
+```bash
+yuno brain config groq        # save a profile named "groq" (API key hidden while typing) and activate it
+yuno brain                    # show the active profile
+yuno brain list                # list saved profiles, marking the active one with *
+yuno brain switch <name>       # switch which saved profile is active
+yuno brain remove <name>       # delete a saved profile
+```
+
+`yuno brain config <name>` prompts for an API key (via `getpass`, so it's
+never echoed to the screen or left in shell history), then optionally a
+model name and an API base URL -- leave either blank to use the built-in
+default (Groq, `llama-3.3-70b-versatile`). Profiles are stored under
+`$CONFIG_DIR/brain/profiles/<name>.json` with `0600` permissions (the
+directory is `0700`), the same way `yuno auth` locks down saved Instagram
+sessions.
+
+Any provider that speaks the same OpenAI-compatible chat completions
+format works, not just Groq -- OpenRouter, Together AI, Fireworks, a
+local vLLM/LM Studio server, etc. Save each as its own named profile with
+its own key/model/endpoint, then `yuno brain switch <name>` to change
+which one larp/curate use:
+
+```bash
+yuno brain config openrouter
+# API key for 'openrouter' (hidden, ...): sk-or-...
+# Model [Enter for the provider's default]: meta-llama/llama-3.1-8b-instruct:free
+# API base URL [Enter for Groq's default]: https://openrouter.ai/api/v1/chat/completions
+
+yuno brain switch groq   # back to the Groq profile
+```
+
+Providers with a genuinely different request format (not OpenAI-style
+chat completions -- e.g. Anthropic's Messages API, Ollama's native
+`/api/generate`) aren't supported this way.
+
+Precedence, most to least specific: a CLI flag (`--model`/`--api-base` on
+`yuno larp`) beats an environment variable (`YUNOBALLIZER_API_KEY`/
+`YUNOBALLIZER_MODEL`/`YUNOBALLIZER_API_BASE`, whether `export`ed or
+loaded from `$CONFIG_DIR/.env`) beats the active `yuno brain` profile
+beats the built-in default. The `.env`/`export` route still works if you
+prefer it (e.g. for scripted/non-interactive setup) -- `$CONFIG_DIR/.env`
+is `KEY=value`, one per line, `#` comments, quotes around the value
+optional, read once at startup:
 
 ```
 # ~/.config/yunoballizer/.env
@@ -159,22 +208,9 @@ YUNOBALLIZER_API_KEY=gsk_...
 YUNOBALLIZER_MODEL=llama-3.1-8b-instant
 ```
 
-Any provider that speaks the same OpenAI-compatible chat completions
-format works, not just Groq -- OpenRouter, Together AI, Fireworks, a
-local vLLM/LM Studio server, etc. Point `--api-base` (or
-`$YUNOBALLIZER_API_BASE`) at that provider's endpoint, pass `--model` for
-its model name, and set `YUNOBALLIZER_API_KEY` to its key:
-
-```bash
-export YUNOBALLIZER_API_KEY=sk-or-...
-yuno larp --style casual \
-  --api-base https://openrouter.ai/api/v1/chat/completions \
-  --model meta-llama/llama-3.1-8b-instruct:free
-```
-
-Providers with a genuinely different request format (not OpenAI-style
-chat completions -- e.g. Anthropic's Messages API, Ollama's native
-`/api/generate`) aren't supported this way.
+Either way, the key never leaves your machine except in the request
+itself -- yunoballizer doesn't store or log it beyond the profile file
+you asked it to save.
 
 ### Instagram login (`yuno auth`)
 
@@ -289,14 +325,19 @@ Using the defaults, the layout looks like this:
 ├── youtube/accounts.txt
 ├── tiktok/accounts.txt
 ├── urls.txt
-└── larp/styles/
-    ├── casual.txt
-    └── formal.txt
+├── larp/styles/
+│   ├── casual.txt
+│   └── formal.txt
+├── brain/
+│   ├── active_profile       # name of the profile larp/curate currently use
+│   └── profiles/            # one file per `yuno brain config`, named <name>.json
+└── .env                      # optional -- see `yuno brain`/`$CONFIG_DIR/.env` above
 ```
 
-Session files hold cookies, not your password, and are written `0600`
-(the containing `sessions/` directory `0700`) -- see [Instagram
-login](#instagram-login-yuno-auth) above for details.
+Session and brain-profile files hold cookies/keys, not your password, and
+are written `0600` (their containing directories `0700`) -- see
+[Instagram login](#instagram-login-yuno-auth) and [`yuno
+brain`](#yuno-brain-ai-provider-profiles) above for details.
 
 **`sources/`** is the source of truth. Every downloaded post is a single
 self-contained directory holding its media, caption, and metadata together --

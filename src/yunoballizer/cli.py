@@ -8,6 +8,7 @@ import sys
 import zlib
 
 from . import auth, config, expand, fetch, prune, storage
+from . import brain as brain_mod
 from . import larp as larp_mod
 from . import profile as profile_mod
 from . import curate as curate_mod
@@ -107,6 +108,25 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("export", help="Copy/hardlink selected media into selected/")
 
     sub.add_parser("all", help="Run download then curate (cron entry point)")
+
+    brain_parser = sub.add_parser(
+        "brain", help="Configure named AI provider profiles used by larp and curate"
+    )
+    brain_sub = brain_parser.add_subparsers(dest="brain_command")
+    brain_config_parser = brain_sub.add_parser(
+        "config", help="Add or update a named profile (interactive) and make it active"
+    )
+    brain_config_parser.add_argument(
+        "name", nargs="?", default="default", help="Profile name (default: 'default')"
+    )
+    brain_sub.add_parser("list", help="List saved profiles, marking the active one")
+    brain_switch_parser = brain_sub.add_parser("switch", help="Switch the active profile")
+    brain_switch_parser.add_argument(
+        "name", nargs="?", default=None,
+        help="Profile to switch to (default: cycle to the next one)",
+    )
+    brain_remove_parser = brain_sub.add_parser("remove", help="Delete a saved profile")
+    brain_remove_parser.add_argument("name", help="Profile name to delete")
 
     larp_parser = sub.add_parser(
         "larp",
@@ -292,6 +312,25 @@ def main(argv: list[str] | None = None) -> None:
         select_mod.run_export()
     elif args.command == "larp":
         _run_larp(args)
+    elif args.command == "brain":
+        if args.brain_command is None:
+            print(brain_mod.describe_active())
+        elif args.brain_command == "config":
+            brain_mod.configure(args.name)
+        elif args.brain_command == "list":
+            names = brain_mod.saved_profiles()
+            if not names:
+                print("No saved brain profiles. Run `yuno brain config <name>` to add one.")
+            active = brain_mod.active_profile_name()
+            for name in names:
+                marker = "*" if name == active else " "
+                print(f"  {marker} {brain_mod.describe(name)}")
+        elif args.brain_command == "switch":
+            name = brain_mod.switch(args.name)
+            print(f"Switched active brain profile to {name!r}.")
+        elif args.brain_command == "remove":
+            brain_mod.remove_profile(args.name)
+            print(f"Removed brain profile {args.name!r}.")
     elif args.command == "all":
         _run_download()
         if (config.DERIVED_DIR / profile_mod.PROFILE_FILENAME).exists():

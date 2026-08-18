@@ -14,6 +14,8 @@ import os
 import urllib.error
 import urllib.request
 
+from . import brain
+
 DEFAULT_API_BASE = "https://api.groq.com/openai/v1/chat/completions"
 API_BASE_ENV = "YUNOBALLIZER_API_BASE"
 API_KEY_ENV = "YUNOBALLIZER_API_KEY"
@@ -29,15 +31,25 @@ class LlmError(Exception):
 
 
 def resolve_model(model: str | None = None) -> str:
-    return model or os.environ.get(MODEL_ENV) or DEFAULT_MODEL
+    return (
+        model
+        or os.environ.get(MODEL_ENV)
+        or (brain.active_profile() or {}).get("model")
+        or DEFAULT_MODEL
+    )
 
 
 def resolve_api_base(api_base: str | None = None) -> str:
-    return api_base or os.environ.get(API_BASE_ENV) or DEFAULT_API_BASE
+    return (
+        api_base
+        or os.environ.get(API_BASE_ENV)
+        or (brain.active_profile() or {}).get("api_base")
+        or DEFAULT_API_BASE
+    )
 
 
 def resolve_api_key() -> str | None:
-    return os.environ.get(API_KEY_ENV)
+    return os.environ.get(API_KEY_ENV) or (brain.active_profile() or {}).get("api_key")
 
 
 def call(
@@ -83,7 +95,8 @@ def call(
                 else "check the key for your configured provider"
             )
             raise LlmError(
-                f"Request rejected the API key (HTTP {exc.code}). Check {API_KEY_ENV}, or {hint}."
+                f"Request rejected the API key (HTTP {exc.code}). Run `yuno brain config` "
+                f"to save a new one, check {API_KEY_ENV}, or {hint}."
             ) from exc
         if exc.code == 429:
             hint = (

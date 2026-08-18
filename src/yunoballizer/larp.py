@@ -213,8 +213,8 @@ def generate(
     api_key = llm.resolve_api_key()
     if not api_key:
         raise SystemExit(
-            f"{llm.API_KEY_ENV} is not set. Get a free key at "
-            "https://console.groq.com/keys, then `export "
+            f"{llm.API_KEY_ENV} is not set. Run `yuno brain config` to save one "
+            f"(get a free key at https://console.groq.com/keys), or `export "
             f"{llm.API_KEY_ENV}=...` before running `yuno larp`."
         )
 

@@ -53,7 +53,10 @@ def _rule_score(caption: str, profile: dict) -> float:
 def _ask_llm(caption: str, profile: dict) -> bool:
     api_key = llm.resolve_api_key()
     if not api_key:
-        logger.warning("%s not set, skipping AI judgment for this item.", llm.API_KEY_ENV)
+        logger.warning(
+            "%s not set (run `yuno brain config` to save one), skipping AI judgment for this item.",
+            llm.API_KEY_ENV,
+        )
         return False
 
     top_hashtags = ", ".join(profile.get("top_hashtags", [])[:15])

@@ -48,6 +48,7 @@ class AskLlmTests(unittest.TestCase):
     def test_missing_api_key_warns_and_skips_without_calling_llm(self) -> None:
         with (
             patch.dict("os.environ", {}, clear=True),
+            patch.object(curate.llm.brain, "active_profile", return_value=None),
             patch.object(curate.llm, "call") as mock_call,
         ):
             result = curate._ask_llm("some caption", {"top_hashtags": [], "top_keywords": []})

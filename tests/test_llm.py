@@ -18,42 +18,101 @@ def _mock_response(payload: dict) -> MagicMock:
 
 class ResolveModelTests(unittest.TestCase):
     def test_explicit_model_wins(self) -> None:
-        with patch.dict("os.environ", {llm.MODEL_ENV: "mistral"}):
+        with (
+            patch.dict("os.environ", {llm.MODEL_ENV: "mistral"}),
+            patch.object(llm.brain, "active_profile", return_value=None),
+        ):
             self.assertEqual(llm.resolve_model("llama-3.1-8b-instant"), "llama-3.1-8b-instant")
 
     def test_env_var_used_when_no_explicit_model(self) -> None:
-        with patch.dict("os.environ", {llm.MODEL_ENV: "mistral"}):
+        with (
+            patch.dict("os.environ", {llm.MODEL_ENV: "mistral"}),
+            patch.object(llm.brain, "active_profile", return_value=None),
+        ):
             self.assertEqual(llm.resolve_model(None), "mistral")
 
+    def test_env_var_wins_over_brain_profile(self) -> None:
+        with (
+            patch.dict("os.environ", {llm.MODEL_ENV: "mistral"}),
+            patch.object(llm.brain, "active_profile", return_value={"model": "from-profile"}),
+        ):
+            self.assertEqual(llm.resolve_model(None), "mistral")
+
+    def test_brain_profile_used_when_no_env_var(self) -> None:
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(llm.brain, "active_profile", return_value={"model": "from-profile"}),
+        ):
+            self.assertEqual(llm.resolve_model(None), "from-profile")
+
     def test_falls_back_to_default(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(llm.brain, "active_profile", return_value=None),
+        ):
             self.assertEqual(llm.resolve_model(None), llm.DEFAULT_MODEL)
 
 
 class ResolveApiBaseTests(unittest.TestCase):
     def test_explicit_api_base_wins(self) -> None:
-        with patch.dict("os.environ", {llm.API_BASE_ENV: "https://env.example/v1/chat/completions"}):
+        with (
+            patch.dict("os.environ", {llm.API_BASE_ENV: "https://env.example/v1/chat/completions"}),
+            patch.object(llm.brain, "active_profile", return_value=None),
+        ):
             self.assertEqual(
                 llm.resolve_api_base("https://explicit.example/v1/chat/completions"),
                 "https://explicit.example/v1/chat/completions",
             )
 
     def test_env_var_used_when_no_explicit_api_base(self) -> None:
-        with patch.dict("os.environ", {llm.API_BASE_ENV: "https://env.example/v1/chat/completions"}):
+        with (
+            patch.dict("os.environ", {llm.API_BASE_ENV: "https://env.example/v1/chat/completions"}),
+            patch.object(llm.brain, "active_profile", return_value=None),
+        ):
             self.assertEqual(llm.resolve_api_base(None), "https://env.example/v1/chat/completions")
 
+    def test_brain_profile_used_when_no_env_var(self) -> None:
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(llm.brain, "active_profile", return_value={"api_base": "https://from.profile/v1"}),
+        ):
+            self.assertEqual(llm.resolve_api_base(None), "https://from.profile/v1")
+
     def test_falls_back_to_default(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(llm.brain, "active_profile", return_value=None),
+        ):
             self.assertEqual(llm.resolve_api_base(None), llm.DEFAULT_API_BASE)
 
 
 class ResolveApiKeyTests(unittest.TestCase):
     def test_reads_the_configured_env_var(self) -> None:
-        with patch.dict("os.environ", {llm.API_KEY_ENV: "test-key"}):
+        with (
+            patch.dict("os.environ", {llm.API_KEY_ENV: "test-key"}),
+            patch.object(llm.brain, "active_profile", return_value=None),
+        ):
             self.assertEqual(llm.resolve_api_key(), "test-key")
 
+    def test_env_var_wins_over_brain_profile(self) -> None:
+        with (
+            patch.dict("os.environ", {llm.API_KEY_ENV: "test-key"}),
+            patch.object(llm.brain, "active_profile", return_value={"api_key": "from-profile"}),
+        ):
+            self.assertEqual(llm.resolve_api_key(), "test-key")
+
+    def test_brain_profile_used_when_no_env_var(self) -> None:
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(llm.brain, "active_profile", return_value={"api_key": "from-profile"}),
+        ):
+            self.assertEqual(llm.resolve_api_key(), "from-profile")
+
     def test_missing_returns_none(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(llm.brain, "active_profile", return_value=None),
+        ):
             self.assertIsNone(llm.resolve_api_key())
 
 
@@ -82,6 +141,7 @@ class CallTests(unittest.TestCase):
 
         with (
             patch.dict("os.environ", {}, clear=True),
+            patch.object(llm.brain, "active_profile", return_value=None),
             patch.object(llm.urllib.request, "urlopen", return_value=mock_resp) as mock_urlopen,
         ):
             llm.call("prompt", api_key="key")

@@ -190,6 +190,7 @@ class GenerateTests(unittest.TestCase):
     def test_missing_api_key_raises_before_any_llm_call(self) -> None:
         with (
             patch.dict("os.environ", {}, clear=True),
+            patch.object(larp.llm.brain, "active_profile", return_value=None),
             patch.object(larp.llm, "call") as mock_call,
         ):
             with self.assertRaises(SystemExit) as ctx:

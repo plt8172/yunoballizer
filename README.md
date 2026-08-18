@@ -150,6 +150,17 @@ you directly instead of failing silently. Your API key is read only from
 history), and never leaves your machine except in the request itself --
 yunoballizer doesn't store or log it.
 
+Instead of `export`ing these in your shell profile, you can put them in
+`$CONFIG_DIR/.env` (`KEY=value`, one per line, `#` comments, quotes around
+the value optional) -- it's read once at startup, and anything already
+`export`ed in your shell always takes priority over the file:
+
+```
+# ~/.config/yunoballizer/.env
+YUNOBALLIZER_API_KEY=gsk_...
+YUNOBALLIZER_MODEL=llama-3.1-8b-instant
+```
+
 Any provider that speaks the same OpenAI-compatible chat completions
 format works, not just Groq -- OpenRouter, Together AI, Fireworks, a
 local vLLM/LM Studio server, etc. Point `--api-base` (or

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -95,6 +96,64 @@ class EnsureConfigTests(unittest.TestCase):
             self.assertTrue((config_dir / "tiktok" / "accounts.txt").exists())
             self.assertTrue((config_dir / "urls.txt").exists())
             self.assertFalse((config_dir / "youtube" / "hashtags.txt").exists())
+
+
+class LoadEnvFileTests(unittest.TestCase):
+    def test_loads_key_value_pairs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text("FOO=bar\nBAZ=qux\n", encoding="utf-8")
+
+            with (
+                patch.object(config, "ENV_FILE", env_path),
+                patch.dict("os.environ", {}, clear=True),
+            ):
+                config.load_env_file()
+                self.assertEqual(os.environ.get("FOO"), "bar")
+                self.assertEqual(os.environ.get("BAZ"), "qux")
+
+    def test_ignores_comments_and_blank_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text("# a comment\n\nFOO=bar\n# FOO=ignored\n", encoding="utf-8")
+
+            with (
+                patch.object(config, "ENV_FILE", env_path),
+                patch.dict("os.environ", {}, clear=True),
+            ):
+                config.load_env_file()
+                self.assertEqual(os.environ.get("FOO"), "bar")
+
+    def test_strips_matching_quotes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text('FOO="bar baz"\nQUX=\'quux\'\n', encoding="utf-8")
+
+            with (
+                patch.object(config, "ENV_FILE", env_path),
+                patch.dict("os.environ", {}, clear=True),
+            ):
+                config.load_env_file()
+                self.assertEqual(os.environ.get("FOO"), "bar baz")
+                self.assertEqual(os.environ.get("QUX"), "quux")
+
+    def test_does_not_override_an_existing_env_var(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text("FOO=from_file\n", encoding="utf-8")
+
+            with (
+                patch.object(config, "ENV_FILE", env_path),
+                patch.dict("os.environ", {"FOO": "from_shell"}),
+            ):
+                config.load_env_file()
+                self.assertEqual(os.environ.get("FOO"), "from_shell")
+
+    def test_missing_file_is_a_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            with patch.object(config, "ENV_FILE", env_path):
+                config.load_env_file()  # must not raise
 
 
 if __name__ == "__main__":

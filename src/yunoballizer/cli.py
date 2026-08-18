@@ -272,6 +272,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     config.ensure_config()
+    config.load_env_file()
 
     if args.command == "fetch":
         fetch.run()

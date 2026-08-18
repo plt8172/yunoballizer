@@ -69,6 +69,8 @@ SELECTION_LOG_PATH = STATE_DIR / "selection_log.json"
 LARP_DIR = CONFIG_DIR / "larp"
 LARP_STYLES_DIR = LARP_DIR / "styles"
 
+ENV_FILE = CONFIG_DIR / ".env"
+
 TEMPLATE_FILES = [
     "instagram/accounts.txt",
     "tiktok/accounts.txt",
@@ -100,6 +102,28 @@ def ensure_config() -> None:
         except Exception:
             content = ""
         dest.write_text(content, encoding="utf-8")
+
+
+def load_env_file() -> None:
+    """Load $CONFIG_DIR/.env into the process environment (KEY=VALUE per
+    line, '#' comments and blank lines ignored, optional matching quotes
+    around the value stripped). Never overrides a variable already set in
+    the environment -- an explicit shell `export` always wins over this
+    file.
+    """
+    if not ENV_FILE.exists():
+        return
+    for raw_line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key:
+            os.environ.setdefault(key, value)
 
 
 def read_lines(path: Path) -> list[str]:

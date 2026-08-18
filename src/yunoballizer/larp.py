@@ -28,7 +28,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import config, llm
+from . import config, llm, termui
 
 _STYLE_NAME_RE = re.compile(r"^[A-Za-z0-9가-힣_-]{1,50}$")
 
@@ -95,14 +95,6 @@ def add_template(style: str, text: str) -> None:
         f.write(text + "\n")
 
 
-def get_template(style: str, index: int) -> str:
-    """Return the full text of the template at `index` within a style (see `yuno larp list <style>`)."""
-    templates = read_templates(style)
-    if index < 0 or index >= len(templates):
-        raise IndexError(f"No template at index {index} in style {style!r}")
-    return templates[index]
-
-
 def remove_template(style: str, index: int) -> str:
     """Remove and return the template at `index` within a style (see `read_templates`/`yuno larp list <style>`).
 
@@ -139,6 +131,38 @@ def delete_style(style: str) -> None:
     if not path.exists():
         raise SystemExit(f"No such style: {style!r}")
     path.unlink()
+
+
+def _render_browse_item(style: str, templates: list[str], index: int) -> None:
+    print("\x1b[2J\x1b[H", end="")
+    # Index is shown alongside position so it can be copied straight into
+    # `yuno larp remove <style> <index>` -- the only other place indices matter.
+    print(f"{style}: index {index} ({index + 1}/{len(templates)})")
+    print()
+    print(templates[index])
+    print()
+    print("<-/-> move   Enter/q quit")
+
+
+def browse(style: str) -> None:
+    """Interactively page through a style's saved templates with the arrow keys."""
+    templates = read_templates(style)
+    if not templates:
+        raise SystemExit(f"No saved templates for style {style!r}.")
+
+    index = 0
+    _render_browse_item(style, templates, index)
+    while True:
+        key = termui.read_key()
+        if key in ("\r", "\n", "q", "\x03", "esc"):
+            break
+        elif key in ("left", "up"):
+            index = max(index - 1, 0)
+        elif key in ("right", "down"):
+            index = min(index + 1, len(templates) - 1)
+        else:
+            continue
+        _render_browse_item(style, templates, index)
 
 
 def build_corpus(style: str | None = None) -> list[str]:

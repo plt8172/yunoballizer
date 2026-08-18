@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yunoballizer import config, larp, select
+from yunoballizer import config, larp, select, termui
 
 
 class RecordSelectionTests(unittest.TestCase):
@@ -184,7 +184,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["right", "s", "right", "s", "left", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
             ):
                 marked = select.pick(source_dir=review_dir)
@@ -197,7 +197,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["s", "s", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
             ):
                 marked = select.pick(source_dir=review_dir)
@@ -228,7 +228,7 @@ class PickTests(unittest.TestCase):
                     rendered_marks.append(set(args[3]))
 
                 with (
-                    patch.object(select, "_read_key", side_effect=["s", "q"]),
+                    patch.object(termui, "read_key", side_effect=["s", "q"]),
                     patch.object(select, "_render_item", side_effect=capture_render),
                 ):
                     marked = select.pick(source_dir=review_dir)
@@ -246,7 +246,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["right", "right", "right", "s", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
             ):
                 marked = select.pick(source_dir=review_dir)
@@ -259,7 +259,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["right", "o", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
                 patch.object(select, "open_native") as mock_open,
             ):
@@ -274,7 +274,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["c", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
                 patch.object(select, "find_caption", return_value="the post's own caption"),
                 patch.object(select, "_prompt_larp_style", return_value="casual"),
@@ -291,7 +291,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["c", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
                 patch.object(select, "find_caption", return_value=""),
                 patch.object(select, "_prompt_larp_style") as mock_prompt,
@@ -309,7 +309,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["c", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
                 patch.object(select, "find_caption", return_value="some caption"),
                 patch.object(select, "_prompt_larp_style", return_value=None),
@@ -325,7 +325,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["c", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
                 patch.object(select, "find_caption", return_value="some caption"),
                 patch.object(select, "_prompt_larp_style", return_value="bad/style"),
@@ -340,7 +340,7 @@ class PickTests(unittest.TestCase):
             review_dir.mkdir()
 
             with (
-                patch.object(select, "_read_key") as mock_read_key,
+                patch.object(termui, "read_key") as mock_read_key,
                 patch.object(select, "_render_item") as mock_render,
             ):
                 marked = select.pick(source_dir=review_dir)
@@ -356,7 +356,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["x", "z", "esc", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item") as mock_render,
             ):
                 select.pick(source_dir=review_dir)
@@ -372,7 +372,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["left", "left", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item") as mock_render,
             ):
                 select.pick(source_dir=review_dir)

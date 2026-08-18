@@ -120,8 +120,7 @@ export YUNOBALLIZER_API_KEY=gsk_...   # free Groq key: https://console.groq.com/
 
 yuno larp add casual "오늘도 열심히 달렸다 #daily #run"   # save a template under the "casual" style
 yuno larp list                                            # list saved styles and their template counts
-yuno larp list casual                                     # list templates within a style, by index
-yuno larp show casual 0                                   # show one template's full content
+yuno larp list casual                                     # browse "casual"'s saved templates one at a time (arrow keys)
 yuno larp remove casual 0                                 # remove a template by index
 yuno larp rename casual laid-back                         # rename a style (its alias)
 yuno larp delete laid-back                                # delete a style and all its templates

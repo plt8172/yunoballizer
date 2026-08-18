@@ -151,14 +151,11 @@ def build_parser() -> argparse.ArgumentParser:
     larp_add_parser.add_argument("style", help="Style name (alias) to save the template under, e.g. 'casual'")
     larp_add_parser.add_argument("text", help="Template text to save")
     larp_list_parser = larp_sub.add_parser(
-        "list", help="List saved styles, or templates within a style if one is given"
+        "list",
+        help="List saved styles, or browse a style's templates one at a time "
+             "(arrow keys) if a style is given",
     )
-    larp_list_parser.add_argument("style", nargs="?", default=None, help="Style name to list templates for")
-    larp_show_parser = larp_sub.add_parser(
-        "show", help="Show the full content of one template (see `yuno larp list <style>` for indices)"
-    )
-    larp_show_parser.add_argument("style", help="Style name the template belongs to")
-    larp_show_parser.add_argument("index", type=int)
+    larp_list_parser.add_argument("style", nargs="?", default=None, help="Style name to browse templates for")
     larp_remove_parser = larp_sub.add_parser(
         "remove", help="Remove a saved template by index (see `yuno larp list <style>`)"
     )
@@ -215,16 +212,7 @@ def _run_larp(args: argparse.Namespace) -> None:
                 count = len(larp_mod.read_templates(style))
                 print(f"{style} ({count} template{'s' if count != 1 else ''})")
         else:
-            templates = larp_mod.read_templates(args.style)
-            if not templates:
-                print(f"No saved templates for style {args.style!r}.")
-            for i, template in enumerate(templates):
-                print(f"[{i}] {template}")
-    elif args.larp_command == "show":
-        try:
-            print(larp_mod.get_template(args.style, args.index))
-        except IndexError as exc:
-            raise SystemExit(str(exc))
+            larp_mod.browse(args.style)
     elif args.larp_command == "remove":
         try:
             removed = larp_mod.remove_template(args.style, args.index)

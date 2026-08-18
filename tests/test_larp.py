@@ -72,26 +72,6 @@ class StyleStorageTests(unittest.TestCase):
                 with self.assertRaises(IndexError):
                     larp.remove_template("casual", 5)
 
-    def test_get_template_returns_full_content_without_removing_it(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
-                larp.add_template("casual", "first template")
-                larp.add_template("casual", "second\ntemplate")
-
-                self.assertEqual(larp.get_template("casual", 1), "second\ntemplate")
-                self.assertEqual(
-                    larp.read_templates("casual"), ["first template", "second\ntemplate"]
-                )
-
-    def test_get_template_out_of_range_raises(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
-                larp.add_template("casual", "only one")
-                with self.assertRaises(IndexError):
-                    larp.get_template("casual", 5)
-
     def test_add_template_rejects_invalid_style_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             styles_dir = Path(tmpdir) / "larp" / "styles"
@@ -314,6 +294,76 @@ class GenerateTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as ctx:
                     larp.generate(style="casual")
             self.assertIn("boom", str(ctx.exception))
+
+
+class BrowseTests(unittest.TestCase):
+    def test_no_saved_templates_raises_system_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            styles_dir = Path(tmpdir) / "larp" / "styles"
+            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+                with self.assertRaises(SystemExit):
+                    larp.browse("casual")
+
+    def test_quits_immediately_on_q(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            styles_dir = Path(tmpdir) / "larp" / "styles"
+            with (
+                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.termui, "read_key", side_effect=["q"]),
+            ):
+                larp.add_template("casual", "one")
+                larp.browse("casual")
+
+    def test_right_advances_and_clamps_at_the_end(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            styles_dir = Path(tmpdir) / "larp" / "styles"
+            with (
+                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(
+                    larp.termui, "read_key", side_effect=["right", "right", "right", "q"]
+                ) as mock_read_key,
+            ):
+                larp.add_template("casual", "one")
+                larp.add_template("casual", "two")
+                larp.browse("casual")
+
+            self.assertEqual(mock_read_key.call_count, 4)
+
+    def test_left_goes_back_and_clamps_at_the_start(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            styles_dir = Path(tmpdir) / "larp" / "styles"
+            with (
+                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.termui, "read_key", side_effect=["left", "left", "q"]),
+            ):
+                larp.add_template("casual", "one")
+                larp.add_template("casual", "two")
+                larp.browse("casual")
+
+    def test_enter_and_ctrl_c_and_esc_all_quit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            styles_dir = Path(tmpdir) / "larp" / "styles"
+            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+                larp.add_template("casual", "one")
+                for quit_key in ("\r", "\n", "\x03", "esc"):
+                    with patch.object(larp.termui, "read_key", side_effect=[quit_key]):
+                        larp.browse("casual")
+
+    @patch("builtins.print")
+    def test_renders_the_current_template_text(self, mock_print) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            styles_dir = Path(tmpdir) / "larp" / "styles"
+            with (
+                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.termui, "read_key", side_effect=["right", "q"]),
+            ):
+                larp.add_template("casual", "first template")
+                larp.add_template("casual", "second template")
+                larp.browse("casual")
+
+            printed = "\n".join(str(call.args[0]) for call in mock_print.call_args_list if call.args)
+            self.assertIn("first template", printed)
+            self.assertIn("second template", printed)
 
 
 if __name__ == "__main__":

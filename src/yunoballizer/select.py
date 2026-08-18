@@ -33,13 +33,10 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import config, larp
+from . import config, larp, termui
 from .storage import VIDEO_EXTS, find_caption, review_link_name
 
 logger = logging.getLogger("yunoballizer.select")
-
-_ARROW_KEYS = {"A": "up", "B": "down", "C": "right", "D": "left"}
-_WIN_ARROW_KEYS = {"H": "up", "P": "down", "M": "right", "K": "left"}
 
 
 def _load_log() -> dict:
@@ -57,34 +54,6 @@ def _selected_paths() -> set[Path]:
     """Return manifest entries as canonical paths under the configured sources root."""
     sources_dir = config.SOURCES_DIR.resolve()
     return {(sources_dir / key).resolve() for key in _load_log()}
-
-
-def _read_key() -> str:
-    """Block for a single raw keypress, normalizing arrow keys to up/down/left/right."""
-    if sys.platform == "win32":
-        import msvcrt
-
-        ch = msvcrt.getch()
-        if ch in (b"\x00", b"\xe0"):
-            ch2 = msvcrt.getch()
-            return _WIN_ARROW_KEYS.get(ch2.decode(errors="ignore"), "")
-        return ch.decode(errors="ignore")
-
-    import termios
-    import tty
-
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        ch = sys.stdin.read(1)
-        if ch == "\x1b":
-            if sys.stdin.read(1) == "[":
-                return _ARROW_KEYS.get(sys.stdin.read(1), "")
-            return "esc"
-        return ch
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 def _describe(path: Path) -> tuple[str, str, str, str]:
@@ -205,7 +174,7 @@ def pick(source_dir: Path | None = None) -> list[Path]:
     marked = _selected_paths() & available
     _render_item(files[index], index, len(files), marked)
     while True:
-        key = _read_key()
+        key = termui.read_key()
         if key in ("\r", "\n", "q", "\x03"):
             break
         elif key in ("left", "up"):

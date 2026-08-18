@@ -1,21 +1,11 @@
 from __future__ import annotations
 
-import json
 import tempfile
 import unittest
-import urllib.error
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from yunoballizer import larp
-
-
-def _mock_response(payload: dict) -> MagicMock:
-    resp = MagicMock()
-    resp.read.return_value = json.dumps(payload).encode("utf-8")
-    resp.__enter__.return_value = resp
-    resp.__exit__.return_value = False
-    return resp
 
 
 class StyleStorageTests(unittest.TestCase):
@@ -216,131 +206,11 @@ class BuildPromptTests(unittest.TestCase):
         self.assertIn("Write it in Korean", prompt)
 
 
-class ResolveModelTests(unittest.TestCase):
-    def test_explicit_model_wins(self) -> None:
-        with patch.dict("os.environ", {larp.MODEL_ENV: "mistral"}):
-            self.assertEqual(larp._resolve_model("llama-3.1-8b-instant"), "llama-3.1-8b-instant")
-
-    def test_env_var_used_when_no_explicit_model(self) -> None:
-        with patch.dict("os.environ", {larp.MODEL_ENV: "mistral"}):
-            self.assertEqual(larp._resolve_model(None), "mistral")
-
-    def test_falls_back_to_default(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(larp._resolve_model(None), larp.DEFAULT_MODEL)
-
-
-class ResolveApiBaseTests(unittest.TestCase):
-    def test_explicit_api_base_wins(self) -> None:
-        with patch.dict("os.environ", {larp.API_BASE_ENV: "https://env.example/v1/chat/completions"}):
-            self.assertEqual(
-                larp._resolve_api_base("https://explicit.example/v1/chat/completions"),
-                "https://explicit.example/v1/chat/completions",
-            )
-
-    def test_env_var_used_when_no_explicit_api_base(self) -> None:
-        with patch.dict("os.environ", {larp.API_BASE_ENV: "https://env.example/v1/chat/completions"}):
-            self.assertEqual(larp._resolve_api_base(None), "https://env.example/v1/chat/completions")
-
-    def test_falls_back_to_default(self) -> None:
-        with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(larp._resolve_api_base(None), larp.DEFAULT_API_BASE)
-
-
-class CallLlmTests(unittest.TestCase):
-    def test_sends_expected_request_and_parses_response(self) -> None:
-        mock_resp = _mock_response({"choices": [{"message": {"content": "  hello world  \n"}}]})
-
-        with patch.object(larp.urllib.request, "urlopen", return_value=mock_resp) as mock_urlopen:
-            text = larp._call_llm(
-                "a prompt", api_key="test-key", model="llama-3.3-70b-versatile",
-                api_base=larp.DEFAULT_API_BASE, timeout=5,
-            )
-
-        self.assertEqual(text, "hello world")
-        request = mock_urlopen.call_args[0][0]
-        self.assertEqual(request.full_url, larp.DEFAULT_API_BASE)
-        self.assertEqual(request.get_method(), "POST")
-        self.assertEqual(request.get_header("Authorization"), "Bearer test-key")
-        self.assertEqual(request.get_header("Content-type"), "application/json")
-        body = json.loads(request.data)
-        self.assertEqual(body["model"], "llama-3.3-70b-versatile")
-        self.assertEqual(body["messages"], [{"role": "user", "content": "a prompt"}])
-
-    def test_sends_request_to_a_custom_api_base(self) -> None:
-        mock_resp = _mock_response({"choices": [{"message": {"content": "hi"}}]})
-        custom_base = "https://openrouter.ai/api/v1/chat/completions"
-
-        with patch.object(larp.urllib.request, "urlopen", return_value=mock_resp) as mock_urlopen:
-            larp._call_llm("prompt", api_key="key", model="m", api_base=custom_base, timeout=5)
-
-        request = mock_urlopen.call_args[0][0]
-        self.assertEqual(request.full_url, custom_base)
-
-    def test_401_at_default_api_base_mentions_groq(self) -> None:
-        error = urllib.error.HTTPError(url=larp.DEFAULT_API_BASE, code=401, msg="Unauthorized", hdrs=None, fp=None)
-        with patch.object(larp.urllib.request, "urlopen", side_effect=error):
-            with self.assertRaises(SystemExit) as ctx:
-                larp._call_llm("prompt", api_key="bad", model="m", api_base=larp.DEFAULT_API_BASE, timeout=5)
-        self.assertIn("YUNOBALLIZER_API_KEY", str(ctx.exception))
-        self.assertIn("console.groq.com", str(ctx.exception))
-
-    def test_401_at_custom_api_base_does_not_mention_groq(self) -> None:
-        custom_base = "https://openrouter.ai/api/v1/chat/completions"
-        error = urllib.error.HTTPError(url=custom_base, code=401, msg="Unauthorized", hdrs=None, fp=None)
-        with patch.object(larp.urllib.request, "urlopen", side_effect=error):
-            with self.assertRaises(SystemExit) as ctx:
-                larp._call_llm("prompt", api_key="bad", model="m", api_base=custom_base, timeout=5)
-        self.assertIn("YUNOBALLIZER_API_KEY", str(ctx.exception))
-        self.assertNotIn("console.groq.com", str(ctx.exception))
-
-    def test_429_raises_system_exit_mentioning_rate_limit(self) -> None:
-        error = urllib.error.HTTPError(url=larp.DEFAULT_API_BASE, code=429, msg="Too Many Requests", hdrs=None, fp=None)
-        with patch.object(larp.urllib.request, "urlopen", side_effect=error):
-            with self.assertRaises(SystemExit) as ctx:
-                larp._call_llm("prompt", api_key="key", model="m", api_base=larp.DEFAULT_API_BASE, timeout=5)
-        self.assertIn("rate limit", str(ctx.exception).lower())
-
-    def test_other_http_error_raises_system_exit(self) -> None:
-        error = urllib.error.HTTPError(url=larp.DEFAULT_API_BASE, code=500, msg="Server Error", hdrs=None, fp=None)
-        with patch.object(larp.urllib.request, "urlopen", side_effect=error):
-            with self.assertRaises(SystemExit):
-                larp._call_llm("prompt", api_key="key", model="m", api_base=larp.DEFAULT_API_BASE, timeout=5)
-
-    def test_network_error_raises_system_exit(self) -> None:
-        error = urllib.error.URLError("no route to host")
-        with patch.object(larp.urllib.request, "urlopen", side_effect=error):
-            with self.assertRaises(SystemExit) as ctx:
-                larp._call_llm("prompt", api_key="key", model="m", api_base=larp.DEFAULT_API_BASE, timeout=5)
-        self.assertIn("internet connection", str(ctx.exception).lower())
-
-    def test_malformed_json_raises_system_exit(self) -> None:
-        resp = MagicMock()
-        resp.read.return_value = b"not json"
-        resp.__enter__.return_value = resp
-        resp.__exit__.return_value = False
-        with patch.object(larp.urllib.request, "urlopen", return_value=resp):
-            with self.assertRaises(SystemExit):
-                larp._call_llm("prompt", api_key="key", model="m", api_base=larp.DEFAULT_API_BASE, timeout=5)
-
-    def test_missing_completion_field_raises_system_exit(self) -> None:
-        mock_resp = _mock_response({"choices": []})
-        with patch.object(larp.urllib.request, "urlopen", return_value=mock_resp):
-            with self.assertRaises(SystemExit):
-                larp._call_llm("prompt", api_key="key", model="m", api_base=larp.DEFAULT_API_BASE, timeout=5)
-
-    def test_empty_completion_raises_system_exit(self) -> None:
-        mock_resp = _mock_response({"choices": [{"message": {"content": "   "}}]})
-        with patch.object(larp.urllib.request, "urlopen", return_value=mock_resp):
-            with self.assertRaises(SystemExit):
-                larp._call_llm("prompt", api_key="key", model="m", api_base=larp.DEFAULT_API_BASE, timeout=5)
-
-
 class GenerateTests(unittest.TestCase):
-    def test_missing_api_key_raises_before_any_http_call(self) -> None:
+    def test_missing_api_key_raises_before_any_llm_call(self) -> None:
         with (
             patch.dict("os.environ", {}, clear=True),
-            patch.object(larp, "_call_llm") as mock_call,
+            patch.object(larp.llm, "call") as mock_call,
         ):
             with self.assertRaises(SystemExit) as ctx:
                 larp.generate(style="casual")
@@ -352,7 +222,7 @@ class GenerateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             styles_dir = Path(tmpdir) / "larp" / "styles"
             with (
-                patch.dict("os.environ", {larp.API_KEY_ENV: "test-key"}),
+                patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
                 patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
             ):
                 with self.assertRaises(SystemExit):
@@ -362,9 +232,9 @@ class GenerateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             styles_dir = Path(tmpdir) / "larp" / "styles"
             with (
-                patch.dict("os.environ", {larp.API_KEY_ENV: "test-key"}),
+                patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
                 patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
-                patch.object(larp, "_call_llm", return_value="generated") as mock_call,
+                patch.object(larp.llm, "call", return_value="generated") as mock_call,
             ):
                 larp.add_template("casual", "example one")
                 results = larp.generate(style="casual", count=3)
@@ -374,14 +244,14 @@ class GenerateTests(unittest.TestCase):
             prompt = mock_call.call_args.args[0]
             self.assertIn("example one", prompt)
 
-    def test_generate_passes_api_base_through_to_call_llm(self) -> None:
+    def test_generate_passes_api_base_through_to_llm_call(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             styles_dir = Path(tmpdir) / "larp" / "styles"
             custom_base = "https://openrouter.ai/api/v1/chat/completions"
             with (
-                patch.dict("os.environ", {larp.API_KEY_ENV: "test-key"}),
+                patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
                 patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
-                patch.object(larp, "_call_llm", return_value="generated") as mock_call,
+                patch.object(larp.llm, "call", return_value="generated") as mock_call,
             ):
                 larp.add_template("casual", "example one")
                 larp.generate(style="casual", api_base=custom_base)
@@ -392,9 +262,9 @@ class GenerateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             styles_dir = Path(tmpdir) / "larp" / "styles"
             with (
-                patch.dict("os.environ", {larp.API_KEY_ENV: "test-key"}),
+                patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
                 patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
-                patch.object(larp, "_call_llm", return_value="generated") as mock_call,
+                patch.object(larp.llm, "call", return_value="generated") as mock_call,
             ):
                 larp.add_template("casual", "example one")
                 larp.generate(style="casual", language="Korean")
@@ -406,9 +276,9 @@ class GenerateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             styles_dir = Path(tmpdir) / "larp" / "styles"
             with (
-                patch.dict("os.environ", {larp.API_KEY_ENV: "test-key"}),
+                patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
                 patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
-                patch.object(larp, "_call_llm", return_value="generated") as mock_call,
+                patch.object(larp.llm, "call", return_value="generated") as mock_call,
             ):
                 for i in range(10):
                     larp.add_template("casual", f"example number {i}")
@@ -424,13 +294,26 @@ class GenerateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             styles_dir = Path(tmpdir) / "larp" / "styles"
             with (
-                patch.dict("os.environ", {larp.API_KEY_ENV: "test-key"}),
+                patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
                 patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
             ):
                 larp.add_template("casual", "one")
                 larp.add_template("formal", "two")
                 with self.assertRaises(SystemExit):
                     larp.generate()
+
+    def test_generate_converts_llm_error_to_system_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            styles_dir = Path(tmpdir) / "larp" / "styles"
+            with (
+                patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
+                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.llm, "call", side_effect=larp.llm.LlmError("boom")),
+            ):
+                larp.add_template("casual", "one")
+                with self.assertRaises(SystemExit) as ctx:
+                    larp.generate(style="casual")
+            self.assertIn("boom", str(ctx.exception))
 
 
 if __name__ == "__main__":

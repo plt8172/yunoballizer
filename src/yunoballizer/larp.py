@@ -1,5 +1,6 @@
-"""Generates comment/caption text via the Groq API, trained on per-style
-saved templates under $CONFIG_DIR/larp/styles/ (one file per style/alias).
+"""Generates comment/caption text via a shared LLM client (see llm.py),
+trained on per-style saved templates under $CONFIG_DIR/larp/styles/ (one
+file per style/alias).
 
 Templates get there two ways: `yuno larp add/list/remove/rename/delete`
 (or editing a style's file directly), and `yuno select`'s 'c' key, which
@@ -12,39 +13,25 @@ Styles are kept in separate files rather than one shared pool so that
 different voices/formats (e.g. a chatty travel-caption style vs a terse
 one-liner style) don't blend into an incoherent average when generating.
 
-Generation itself calls an OpenAI-compatible chat completions endpoint
-(Groq's free-tier Llama models by default; any provider with the same
-request/response shape works -- OpenRouter, Together, a local vLLM/LM
-Studio server, etc. -- via --api-base/--model) as a few-shot text
-generator: a style's saved templates go in as examples, and the model is
-asked for one new example in the same voice. Needs a free API key in
-$YUNOBALLIZER_API_KEY (https://console.groq.com/keys for the Groq
-default) -- only `generate()` needs it; every template-storage function
-above works without one. Talks over plain HTTP using only the stdlib (no
-new dependency), and never degrades silently on failure (missing key,
-rate limit, network error, etc. all raise an actionable SystemExit) since
-the call is the entire point of running `yuno larp`, not a background
-best-effort signal.
+Generation itself is a few-shot text generator: a style's saved templates
+go in as examples, and the model is asked for one new example in the same
+voice. Needs a free API key in $YUNOBALLIZER_API_KEY
+(https://console.groq.com/keys for the default Groq provider) -- only
+`generate()` needs it; every template-storage function above works
+without one. Never degrades silently on failure (missing key, rate limit,
+network error, etc. all raise an actionable SystemExit) since the call is
+the entire point of running `yuno larp`, not a background best-effort
+signal.
 """
 from __future__ import annotations
 
-import json
-import os
 import re
-import urllib.error
-import urllib.request
 from pathlib import Path
 
-from . import config
+from . import config, llm
 
 _STYLE_NAME_RE = re.compile(r"^[A-Za-z0-9가-힣_-]{1,50}$")
 
-DEFAULT_API_BASE = "https://api.groq.com/openai/v1/chat/completions"
-API_BASE_ENV = "YUNOBALLIZER_API_BASE"
-API_KEY_ENV = "YUNOBALLIZER_API_KEY"
-MODEL_ENV = "YUNOBALLIZER_MODEL"
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
-DEFAULT_TIMEOUT = 30
 DEFAULT_MAX_EXAMPLES = 8
 
 
@@ -190,79 +177,21 @@ def _build_prompt(examples: list[str], language: str | None = None) -> str:
     )
 
 
-def _resolve_model(model: str | None) -> str:
-    return model or os.environ.get(MODEL_ENV) or DEFAULT_MODEL
-
-
-def _resolve_api_base(api_base: str | None) -> str:
-    return api_base or os.environ.get(API_BASE_ENV) or DEFAULT_API_BASE
-
-
-def _call_llm(prompt: str, *, api_key: str, model: str, api_base: str, timeout: int) -> str:
-    payload = json.dumps({
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.9,
-        "max_tokens": 200,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        api_base, data=payload, method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
-            hint = (
-                "get a free key at https://console.groq.com/keys"
-                if api_base == DEFAULT_API_BASE
-                else "check the key for your configured provider"
-            )
-            raise SystemExit(
-                f"Request rejected the API key (HTTP {exc.code}). Check {API_KEY_ENV}, or {hint}."
-            ) from exc
-        if exc.code == 429:
-            hint = (
-                " or check https://console.groq.com/settings/limits"
-                if api_base == DEFAULT_API_BASE else ""
-            )
-            raise SystemExit(
-                f"Hit a rate limit (HTTP 429). Wait a bit and try again{hint}."
-            ) from exc
-        raise SystemExit(f"Request failed: HTTP {exc.code} {exc.reason}") from exc
-    except urllib.error.URLError as exc:
-        raise SystemExit(f"Could not reach {api_base} ({exc.reason}). Check your internet connection.") from exc
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"Got an unparseable response: {exc}") from exc
-
-    try:
-        text = body["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError, TypeError) as exc:
-        raise SystemExit(f"Response was missing the expected completion: {exc}") from exc
-    if not text:
-        raise SystemExit(f"Got an empty response from model {model!r}. Try again.")
-    return text
-
-
 def generate(
     style: str | None = None,
     count: int = 1,
     model: str | None = None,
     api_base: str | None = None,
     language: str | None = None,
-    timeout: int = DEFAULT_TIMEOUT,
+    timeout: int = llm.DEFAULT_TIMEOUT,
     max_examples: int = DEFAULT_MAX_EXAMPLES,
 ) -> list[str]:
-    api_key = os.environ.get(API_KEY_ENV)
+    api_key = llm.resolve_api_key()
     if not api_key:
         raise SystemExit(
-            f"{API_KEY_ENV} is not set. Get a free key at "
+            f"{llm.API_KEY_ENV} is not set. Get a free key at "
             "https://console.groq.com/keys, then `export "
-            f"{API_KEY_ENV}=...` before running `yuno larp`."
+            f"{llm.API_KEY_ENV}=...` before running `yuno larp`."
         )
 
     corpus = build_corpus(style=style)
@@ -273,11 +202,12 @@ def generate(
             f"or edit a file under {config.LARP_STYLES_DIR} directly."
         )
 
-    resolved_model = _resolve_model(model)
-    resolved_api_base = _resolve_api_base(api_base)
     prompt = _build_prompt(corpus[:max_examples], language=language)
 
-    return [
-        _call_llm(prompt, api_key=api_key, model=resolved_model, api_base=resolved_api_base, timeout=timeout)
-        for _ in range(count)
-    ]
+    results = []
+    for _ in range(count):
+        try:
+            results.append(llm.call(prompt, api_key=api_key, model=model, api_base=api_base, timeout=timeout))
+        except llm.LlmError as exc:
+            raise SystemExit(str(exc)) from exc
+    return results

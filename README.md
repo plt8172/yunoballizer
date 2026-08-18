@@ -36,12 +36,11 @@ pip install -e .
 Installing registers both the `yunoballizer` and `yuno` commands on PATH
 (no manual alias needed).
 
-To use Claude API-based curation:
-
-```bash
-pip install -e ".[curate]"
-export ANTHROPIC_API_KEY=sk-ant-...
-```
+`yuno curate`'s optional AI-assisted judgment (used when rule-based
+scoring is ambiguous) uses the same LLM setup as `yuno larp` -- no extra
+install, no separate key. See the [`yuno larp`](#yuno-larp-commentcaption-text-generation)
+section below for how to set `YUNOBALLIZER_API_KEY` (and optionally
+`YUNOBALLIZER_MODEL`/`YUNOBALLIZER_API_BASE`).
 
 ## First-time setup
 

@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from pathlib import Path
 from shutil import copy2
 
-from . import config
+from . import config, llm
 from .profile import PROFILE_FILENAME
 from .storage import MEDIA_EXTS, find_caption, review_link_name
 
@@ -51,19 +50,12 @@ def _rule_score(caption: str, profile: dict) -> float:
     return (hashtag_hits * 2 + keyword_hits) / total_signals
 
 
-def _ask_claude(caption: str, profile: dict) -> bool:
-    try:
-        import anthropic
-    except ImportError:
-        logger.warning("anthropic package not installed: pip install 'yunoballizer[curate]'")
-        return False
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+def _ask_llm(caption: str, profile: dict) -> bool:
+    api_key = llm.resolve_api_key()
     if not api_key:
-        logger.warning("ANTHROPIC_API_KEY not set, skipping AI judgment for this item.")
+        logger.warning("%s not set, skipping AI judgment for this item.", llm.API_KEY_ENV)
         return False
 
-    client = anthropic.Anthropic(api_key=api_key)
     top_hashtags = ", ".join(profile.get("top_hashtags", [])[:15])
     top_keywords = ", ".join(profile.get("top_keywords", [])[:20])
 
@@ -79,18 +71,11 @@ Here is the caption of a newly discovered post:
 Is this user likely to enjoy this post? Answer with a single word, "yes" or "no"."""
 
     try:
-        resp = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=5,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        answer = "".join(
-            block.text for block in resp.content if block.type == "text"
-        ).strip().lower()
-        return answer.startswith("y")
-    except Exception as e:
-        logger.error("Claude API call failed: %s", e)
+        answer = llm.call(prompt, api_key=api_key, max_tokens=5, temperature=0)
+    except llm.LlmError as exc:
+        logger.error("LLM call failed: %s", exc)
         return False
+    return answer.strip().lower().startswith("y")
 
 
 def run() -> None:
@@ -118,7 +103,7 @@ def run() -> None:
             elif score <= LOW_THRESHOLD:
                 decision = "skip"
             else:
-                decision = "keep" if _ask_claude(caption, profile) else "skip"
+                decision = "keep" if _ask_llm(caption, profile) else "skip"
 
             log[key] = {"score": round(score, 3), "decision": decision}
 

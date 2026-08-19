@@ -26,11 +26,13 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import date
 from pathlib import Path
 
 import instaloader
 
 from .. import config, storage
+from .budget import TotalBudget
 
 logger = logging.getLogger("yunoballizer.instagram")
 
@@ -54,6 +56,10 @@ def harvest(
     limit: int = 20,
     accounts: list[str] | None = None,
     skip: int = 0,
+    since: date | None = None,
+    until: date | None = None,
+    media_type: str | None = None,
+    budget: TotalBudget | None = None,
 ) -> None:
     if accounts is None:
         accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
@@ -74,6 +80,13 @@ def harvest(
     )
 
     for account in accounts:
+        if budget is not None and budget.exhausted:
+            logger.info("Total download limit reached; stopping.")
+            break
+        account_limit = budget.take(limit) if budget is not None else limit
+        if account_limit <= 0:
+            continue
+
         logger.info("[account] checking %s...", account)
         account_dir = out_dir / account
         try:
@@ -85,6 +98,14 @@ def harvest(
                 nonlocal remaining_to_skip
                 if remaining_to_skip:
                     remaining_to_skip -= 1
+                    return False
+                if since is not None and post.date_utc.date() < since:
+                    return False
+                if until is not None and post.date_utc.date() > until:
+                    return False
+                if media_type == "photo" and post.is_video:
+                    return False
+                if media_type == "video" and not post.is_video:
                     return False
                 post_dir = account_dir / post.shortcode
                 if not post_dir.is_dir():
@@ -104,7 +125,7 @@ def harvest(
                 {profile},
                 profile_pic=False,
                 fast_update=False,
-                max_count=skip + limit,
+                max_count=skip + account_limit,
                 post_filter=include_post,
             )
             _remove_profile_metadata_json(account_dir, profile, loader)

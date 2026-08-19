@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,7 @@ from unittest.mock import Mock, patch
 
 from yunoballizer import cli, storage
 from yunoballizer.downloaders import instagram, tiktok, youtube, ytdlp_helper
+from yunoballizer.downloaders.budget import TotalBudget
 
 
 class _FakeProfile:
@@ -70,6 +72,106 @@ class CliParserTests(unittest.TestCase):
 
         for harvest in (instagram_harvest, youtube_harvest, tiktok_harvest):
             harvest.assert_called_once_with(limit=10, skip=5, accounts=["nasa"])
+
+    def test_parser_accepts_new_download_flags(self) -> None:
+        args = cli.build_parser().parse_args([
+            "download",
+            "-p", "instagram", "-p", "tiktok",
+            "--since", "2026-01-01",
+            "--until", "2026-06-30",
+            "-t", "photo",
+            "--total-limit", "50",
+            "--delay", "5",
+        ])
+
+        self.assertEqual(args.platforms, ["instagram", "tiktok"])
+        self.assertEqual(args.since, datetime.date(2026, 1, 1))
+        self.assertEqual(args.until, datetime.date(2026, 6, 30))
+        self.assertEqual(args.media_type, "photo")
+        self.assertEqual(args.total_limit, 50)
+        self.assertEqual(args.delay, 5)
+
+    def test_parser_rejects_invalid_date(self) -> None:
+        with self.assertRaises(SystemExit):
+            cli.build_parser().parse_args(["download", "--since", "01-01-2026"])
+
+    def test_main_rejects_since_after_until(self) -> None:
+        with self.assertRaises(SystemExit):
+            cli.main(["download", "--since", "2026-06-30", "--until", "2026-01-01"])
+
+    def test_run_download_restricts_to_selected_platforms(self) -> None:
+        with (
+            patch.object(cli.instagram, "harvest") as instagram_harvest,
+            patch.object(cli.youtube, "harvest") as youtube_harvest,
+            patch.object(cli.tiktok, "harvest") as tiktok_harvest,
+            patch.object(cli.urls_mod, "harvest") as urls_harvest,
+            patch.object(cli.storage, "refresh_review", return_value=0),
+        ):
+            cli._run_download(platforms=["instagram"])
+
+        instagram_harvest.assert_called_once_with(limit=20, skip=0, accounts=None)
+        youtube_harvest.assert_not_called()
+        tiktok_harvest.assert_not_called()
+        # urls.txt isn't tied to one platform, so a -p filter skips it too.
+        urls_harvest.assert_not_called()
+
+    def test_run_download_forwards_since_until_type_and_delay(self) -> None:
+        since = datetime.date(2026, 1, 1)
+        until = datetime.date(2026, 6, 30)
+        with (
+            patch.object(cli.instagram, "harvest") as instagram_harvest,
+            patch.object(cli.youtube, "harvest") as youtube_harvest,
+            patch.object(cli.tiktok, "harvest") as tiktok_harvest,
+            patch.object(cli.urls_mod, "harvest"),
+            patch.object(cli.storage, "refresh_review", return_value=0),
+        ):
+            cli._run_download(since=since, until=until, media_type="video", delay=5)
+
+        for harvest in (instagram_harvest, youtube_harvest, tiktok_harvest):
+            harvest.assert_called_once_with(
+                limit=20, skip=0, accounts=None,
+                since=since, until=until, media_type="video", sleep_seconds=5,
+            )
+
+    def test_run_download_shares_one_budget_across_platforms(self) -> None:
+        with (
+            patch.object(cli.instagram, "harvest") as instagram_harvest,
+            patch.object(cli.youtube, "harvest") as youtube_harvest,
+            patch.object(cli.tiktok, "harvest") as tiktok_harvest,
+            patch.object(cli.urls_mod, "harvest"),
+            patch.object(cli.storage, "refresh_review", return_value=0),
+        ):
+            cli._run_download(total_limit=30)
+
+        budgets = {
+            call.kwargs["budget"]
+            for call in (
+                instagram_harvest.call_args, youtube_harvest.call_args, tiktok_harvest.call_args,
+            )
+        }
+        self.assertEqual(len(budgets), 1)
+        self.assertIsInstance(budgets.pop(), TotalBudget)
+
+
+class TotalBudgetTests(unittest.TestCase):
+    def test_unlimited_when_no_limit_given(self) -> None:
+        budget = TotalBudget(None)
+        self.assertFalse(budget.exhausted)
+        self.assertEqual(budget.take(20), 20)
+        self.assertFalse(budget.exhausted)
+
+    def test_caps_and_spends_across_calls(self) -> None:
+        budget = TotalBudget(15)
+        self.assertEqual(budget.take(20), 15)
+        self.assertTrue(budget.exhausted)
+        self.assertEqual(budget.take(5), 0)
+
+    def test_splits_across_several_accounts(self) -> None:
+        budget = TotalBudget(25)
+        self.assertEqual(budget.take(20), 20)
+        self.assertFalse(budget.exhausted)
+        self.assertEqual(budget.take(20), 5)
+        self.assertTrue(budget.exhausted)
 
 
 class InstagramDownloadTests(unittest.TestCase):
@@ -170,6 +272,74 @@ class InstagramDownloadTests(unittest.TestCase):
 
         organize.assert_called_once_with(Path(tmpdir) / "instagram" / "nasa")
 
+    def test_post_filter_honors_since_until_and_media_type(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(instagram.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(
+                instagram.instaloader, "Instaloader",
+                return_value=SimpleNamespace(context=object(), download_profiles=Mock(), compress_json=True),
+            ),
+            patch.object(
+                instagram.instaloader.Profile, "from_username",
+                return_value=_FakeProfile("nasa"),
+            ),
+            patch.object(instagram.time, "sleep"),
+            patch.object(instagram.storage, "organize_instagram_account"),
+        ):
+            instagram.harvest(
+                accounts=["nasa"], sleep_seconds=0,
+                since=datetime.date(2026, 1, 1), until=datetime.date(2026, 6, 30),
+                media_type="photo",
+            )
+
+            loader = instagram.instaloader.Instaloader.return_value
+            post_filter = loader.download_profiles.call_args.kwargs["post_filter"]
+
+            too_early = SimpleNamespace(
+                shortcode="early", mediacount=1, is_video=False,
+                date_utc=datetime.datetime(2025, 12, 31),
+            )
+            too_late = SimpleNamespace(
+                shortcode="late", mediacount=1, is_video=False,
+                date_utc=datetime.datetime(2026, 7, 1),
+            )
+            a_video = SimpleNamespace(
+                shortcode="vid", mediacount=1, is_video=True,
+                date_utc=datetime.datetime(2026, 3, 1),
+            )
+            a_photo = SimpleNamespace(
+                shortcode="pic", mediacount=1, is_video=False,
+                date_utc=datetime.datetime(2026, 3, 1),
+            )
+            self.assertFalse(post_filter(too_early))
+            self.assertFalse(post_filter(too_late))
+            self.assertFalse(post_filter(a_video))
+            self.assertTrue(post_filter(a_photo))
+
+    def test_budget_caps_max_count_and_stops_once_exhausted(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(instagram.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(
+                instagram.instaloader, "Instaloader",
+                return_value=SimpleNamespace(context=object(), download_profiles=Mock(), compress_json=True),
+            ),
+            patch.object(
+                instagram.instaloader.Profile, "from_username",
+                return_value=_FakeProfile("nasa"),
+            ),
+            patch.object(instagram.time, "sleep"),
+            patch.object(instagram.storage, "organize_instagram_account"),
+        ):
+            budget = TotalBudget(3)
+            instagram.harvest(accounts=["a", "b"], limit=20, sleep_seconds=0, budget=budget)
+
+            loader = instagram.instaloader.Instaloader.return_value
+            self.assertEqual(loader.download_profiles.call_count, 1)
+            self.assertEqual(loader.download_profiles.call_args.kwargs["max_count"], 3)
+            self.assertTrue(budget.exhausted)
+
     def test_removes_stray_profile_level_metadata_json_after_harvest(self) -> None:
         # Instaloader.download_profiles() unconditionally drops a
         # "<username>_<userid>.json[.xz]" profile-level metadata file in the
@@ -241,6 +411,51 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
         self.assertIn("/%(id)s/metadata.%(ext)s", download.call_args.kwargs["metadata_template"])
         self.assertIn("/%(id)s/caption.%(ext)s", download.call_args.kwargs["caption_template"])
         organize.assert_called_once_with(Path(tmpdir) / "tiktok")
+
+    def test_youtube_forwards_since_until_as_yt_dlp_date_opts(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(youtube.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(youtube.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(youtube, "download") as download,
+            patch.object(youtube.storage, "organize_ytdlp_tree"),
+        ):
+            youtube.harvest(
+                accounts=["@nasa"],
+                since=datetime.date(2026, 1, 1), until=datetime.date(2026, 6, 30),
+            )
+
+        extra_opts = download.call_args.args[3]
+        self.assertEqual(extra_opts["dateafter"], "20260101")
+        self.assertEqual(extra_opts["datebefore"], "20260630")
+
+    def test_youtube_skips_entirely_for_type_photo(self) -> None:
+        with patch.object(youtube, "download") as download:
+            youtube.harvest(accounts=["@nasa"], media_type="photo")
+
+        download.assert_not_called()
+
+    def test_tiktok_skips_entirely_for_type_photo(self) -> None:
+        with patch.object(tiktok, "download") as download:
+            tiktok.harvest(accounts=["nasa"], media_type="photo")
+
+        download.assert_not_called()
+
+    def test_tiktok_budget_caps_playlistend_and_stops_once_exhausted(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(tiktok.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(tiktok.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(tiktok, "download") as download,
+            patch.object(tiktok.storage, "organize_ytdlp_tree"),
+            patch.object(tiktok.time, "sleep"),
+        ):
+            budget = TotalBudget(3)
+            tiktok.harvest(accounts=["a", "b"], limit=20, budget=budget)
+
+        download.assert_called_once()
+        self.assertEqual(download.call_args.args[3]["playlistend"], 3)
+        self.assertTrue(budget.exhausted)
 
 
 if __name__ == "__main__":

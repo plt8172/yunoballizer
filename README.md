@@ -82,6 +82,13 @@ yuno download @nasa      # Harvest a single account across all three platforms i
 yuno download -l 5       # Cap harvest at 5 posts per account (default: 20)
 yuno download -s 5 -l 10 # Skip the newest 5 posts, then harvest the next 10 per account
 
+yuno download -p instagram              # Only harvest Instagram (repeat -p for more than one platform)
+yuno download --since 2026-01-01        # Only posts published on/after this date
+yuno download --until 2026-06-30        # Only posts published on/before this date
+yuno download -t photo                  # Only photos (YouTube Shorts/TikTok are always video, so this skips them)
+yuno download --total-limit 50          # Cap posts requested across every account/platform combined
+yuno download --delay 5                 # Seconds to wait between accounts (overrides each platform's own default)
+
 yuno select                # Browse review/ one item at a time: s to select, c to save a larp template, o to open natively
 yuno export                # Copy/hardlink everything you've selected into selected/
 

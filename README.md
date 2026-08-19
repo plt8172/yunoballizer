@@ -191,8 +191,8 @@ which one larp/curate use:
 ```bash
 yuno brain config openrouter
 # API key for 'openrouter' (hidden, ...): sk-or-...
-# Model [Enter for the provider's default]: meta-llama/llama-3.1-8b-instruct:free
-# API base URL [Enter for Groq's default]: https://openrouter.ai/api/v1/chat/completions
+# Model [Enter for llama-3.3-70b-versatile]: meta-llama/llama-3.1-8b-instruct:free
+# API base URL [Enter for https://api.groq.com/openai/v1/chat/completions]: https://openrouter.ai/api/v1/chat/completions
 
 yuno brain switch groq   # back to the Groq profile
 ```

@@ -94,13 +94,15 @@ def save_profile(
 def configure(name: str) -> None:
     """Interactively prompt for an API key (hidden) and optional
     model/api-base, then save and activate the named profile."""
+    from . import llm  # local: avoids a module-level cycle with llm.py
+
     api_key = getpass.getpass(
         f"API key for {name!r} (hidden, e.g. a free key at https://console.groq.com/keys): "
     ).strip()
     if not api_key:
         raise SystemExit("An API key is required.")
-    model = input("Model [Enter for the provider's default]: ").strip()
-    api_base = input("API base URL [Enter for Groq's default]: ").strip()
+    model = input(f"Model [Enter for {llm.DEFAULT_MODEL}]: ").strip()
+    api_base = input(f"API base URL [Enter for {llm.DEFAULT_API_BASE}]: ").strip()
 
     save_profile(name, api_key, model=model or None, api_base=api_base or None)
     print(f"Saved and activated brain profile {name!r}.")

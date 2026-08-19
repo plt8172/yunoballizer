@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yunoballizer import config, select
+from yunoballizer import config, larp, select, termui
 
 
 class RecordSelectionTests(unittest.TestCase):
@@ -184,7 +184,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["right", "s", "right", "s", "left", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
             ):
                 marked = select.pick(source_dir=review_dir)
@@ -197,7 +197,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["s", "s", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
             ):
                 marked = select.pick(source_dir=review_dir)
@@ -228,7 +228,7 @@ class PickTests(unittest.TestCase):
                     rendered_marks.append(set(args[3]))
 
                 with (
-                    patch.object(select, "_read_key", side_effect=["s", "q"]),
+                    patch.object(termui, "read_key", side_effect=["s", "q"]),
                     patch.object(select, "_render_item", side_effect=capture_render),
                 ):
                     marked = select.pick(source_dir=review_dir)
@@ -246,7 +246,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["right", "right", "right", "s", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
             ):
                 marked = select.pick(source_dir=review_dir)
@@ -259,7 +259,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["right", "o", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
                 patch.object(select, "open_native") as mock_open,
             ):
@@ -268,13 +268,79 @@ class PickTests(unittest.TestCase):
             mock_open.assert_called_once()
             self.assertEqual(mock_open.call_args[0][0].resolve(), real_files[1])
 
+    def test_c_key_saves_the_items_own_caption_as_a_template(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, real_files = self._review_dir_with_links(Path(tmpdir), 2)
+            keys = iter(["c", "q"])
+
+            with (
+                patch.object(termui, "read_key", side_effect=keys),
+                patch.object(select, "_render_item"),
+                patch.object(select, "find_caption", return_value="the post's own caption"),
+                patch.object(select, "_prompt_larp_style", return_value="casual"),
+                patch.object(select.larp, "add_template") as mock_add,
+            ):
+                marked = select.pick(source_dir=review_dir)
+
+            mock_add.assert_called_once_with("casual", "the post's own caption")
+            self.assertEqual(marked, [])
+
+    def test_c_key_with_no_caption_skips_the_style_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, _ = self._review_dir_with_links(Path(tmpdir), 1)
+            keys = iter(["c", "q"])
+
+            with (
+                patch.object(termui, "read_key", side_effect=keys),
+                patch.object(select, "_render_item"),
+                patch.object(select, "find_caption", return_value=""),
+                patch.object(select, "_prompt_larp_style") as mock_prompt,
+                patch.object(select.larp, "add_template") as mock_add,
+                patch("builtins.input", return_value=""),
+            ):
+                select.pick(source_dir=review_dir)
+
+            mock_prompt.assert_not_called()
+            mock_add.assert_not_called()
+
+    def test_c_key_cancelled_style_prompt_saves_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, _ = self._review_dir_with_links(Path(tmpdir), 1)
+            keys = iter(["c", "q"])
+
+            with (
+                patch.object(termui, "read_key", side_effect=keys),
+                patch.object(select, "_render_item"),
+                patch.object(select, "find_caption", return_value="some caption"),
+                patch.object(select, "_prompt_larp_style", return_value=None),
+                patch.object(select.larp, "add_template") as mock_add,
+            ):
+                select.pick(source_dir=review_dir)
+
+            mock_add.assert_not_called()
+
+    def test_c_key_invalid_style_name_does_not_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, _ = self._review_dir_with_links(Path(tmpdir), 1)
+            keys = iter(["c", "q"])
+
+            with (
+                patch.object(termui, "read_key", side_effect=keys),
+                patch.object(select, "_render_item"),
+                patch.object(select, "find_caption", return_value="some caption"),
+                patch.object(select, "_prompt_larp_style", return_value="bad/style"),
+                patch.object(select.larp, "add_template", side_effect=ValueError("invalid style")),
+                patch("builtins.input", return_value=""),
+            ):
+                select.pick(source_dir=review_dir)  # must not raise
+
     def test_empty_review_dir_returns_immediately_without_reading_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             review_dir = Path(tmpdir) / "review"
             review_dir.mkdir()
 
             with (
-                patch.object(select, "_read_key") as mock_read_key,
+                patch.object(termui, "read_key") as mock_read_key,
                 patch.object(select, "_render_item") as mock_render,
             ):
                 marked = select.pick(source_dir=review_dir)
@@ -290,7 +356,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["x", "z", "esc", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item") as mock_render,
             ):
                 select.pick(source_dir=review_dir)
@@ -306,12 +372,58 @@ class PickTests(unittest.TestCase):
             keys = iter(["left", "left", "q"])
 
             with (
-                patch.object(select, "_read_key", side_effect=keys),
+                patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item") as mock_render,
             ):
                 select.pick(source_dir=review_dir)
 
             mock_render.assert_called_once()
+
+
+class StyleCompleterTests(unittest.TestCase):
+    def test_completes_matching_prefix(self) -> None:
+        complete = select._style_completer(["casual", "formal", "chatty"])
+        self.assertEqual(complete("c", 0), "casual")
+        self.assertEqual(complete("c", 1), "chatty")
+        self.assertIsNone(complete("c", 2))
+
+    def test_no_match_returns_none(self) -> None:
+        complete = select._style_completer(["casual"])
+        self.assertIsNone(complete("z", 0))
+
+    def test_empty_prefix_matches_everything(self) -> None:
+        complete = select._style_completer(["casual", "formal"])
+        self.assertEqual(complete("", 0), "casual")
+        self.assertEqual(complete("", 1), "formal")
+
+
+class PromptLarpStyleTests(unittest.TestCase):
+    def test_returns_the_entered_style(self) -> None:
+        with (
+            patch.object(select.larp, "list_styles", return_value=["casual"]),
+            patch("builtins.input", return_value="casual"),
+        ):
+            result = select._prompt_larp_style()
+
+        self.assertEqual(result, "casual")
+
+    def test_empty_style_cancels(self) -> None:
+        with (
+            patch.object(select.larp, "list_styles", return_value=[]),
+            patch("builtins.input", return_value=""),
+        ):
+            result = select._prompt_larp_style()
+
+        self.assertIsNone(result)
+
+    def test_keyboard_interrupt_cancels(self) -> None:
+        with (
+            patch.object(select.larp, "list_styles", return_value=[]),
+            patch("builtins.input", side_effect=KeyboardInterrupt),
+        ):
+            result = select._prompt_larp_style()
+
+        self.assertIsNone(result)
 
 
 class DescribeTests(unittest.TestCase):

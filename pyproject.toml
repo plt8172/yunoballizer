@@ -11,9 +11,6 @@ dependencies = [
     "playwright>=1.40",
 ]
 
-[project.optional-dependencies]
-curate = ["anthropic>=0.25.0"]
-
 [project.scripts]
 yunoballizer = "yunoballizer.cli:main"
 yuno = "yunoballizer.cli:main"

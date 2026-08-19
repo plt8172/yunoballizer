@@ -5,6 +5,11 @@ Deliberately decoupled from the filesystem: review/ stays a disposable
 symlink index (see storage.py), and the "what did I pick" state lives in
 selection_log.json instead of being encoded via symlinks or deletions.
 
+Saving the current item's caption as a larp template ('c') is a completely
+separate action from picking favorites ('s'): it doesn't touch
+selection_log.json or require the current item to be selected, and 's'
+never touches larp's template files. See larp.py for where it lands.
+
 The picker shows one item at a time (account / image / caption) rather than
 a live list-plus-preview split. That's not just simplicity for its own sake:
 splitting the screen between a navigable list and a concurrently-rendered
@@ -28,13 +33,10 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import config
+from . import config, larp, termui
 from .storage import VIDEO_EXTS, find_caption, review_link_name
 
 logger = logging.getLogger("yunoballizer.select")
-
-_ARROW_KEYS = {"A": "up", "B": "down", "C": "right", "D": "left"}
-_WIN_ARROW_KEYS = {"H": "up", "P": "down", "M": "right", "K": "left"}
 
 
 def _load_log() -> dict:
@@ -52,34 +54,6 @@ def _selected_paths() -> set[Path]:
     """Return manifest entries as canonical paths under the configured sources root."""
     sources_dir = config.SOURCES_DIR.resolve()
     return {(sources_dir / key).resolve() for key in _load_log()}
-
-
-def _read_key() -> str:
-    """Block for a single raw keypress, normalizing arrow keys to up/down/left/right."""
-    if sys.platform == "win32":
-        import msvcrt
-
-        ch = msvcrt.getch()
-        if ch in (b"\x00", b"\xe0"):
-            ch2 = msvcrt.getch()
-            return _WIN_ARROW_KEYS.get(ch2.decode(errors="ignore"), "")
-        return ch.decode(errors="ignore")
-
-    import termios
-    import tty
-
-    fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
-    try:
-        tty.setraw(fd)
-        ch = sys.stdin.read(1)
-        if ch == "\x1b":
-            if sys.stdin.read(1) == "[":
-                return _ARROW_KEYS.get(sys.stdin.read(1), "")
-            return "esc"
-        return ch
-    finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
 
 def _describe(path: Path) -> tuple[str, str, str, str]:
@@ -111,7 +85,7 @@ def _render_item(path: Path, index: int, total: int, marked: set[Path]) -> None:
     size = _format_size(resolved.stat().st_size)
     star = " [SELECTED]" if resolved in marked else ""
     header = f"[{index + 1}/{total}] {platform} / {account} / {post_id} / {filename} ({size}){star}"
-    footer = "<-/-> move   s select/deselect   o open natively   Enter/q finish"
+    footer = "<-/-> move   s select/deselect   c save caption as larp template   o open natively   Enter/q finish"
 
     # Truncate to a single line (not wrapped) so its screen-row cost is
     # predictable -- a caption that wraps across several rows would throw
@@ -142,6 +116,48 @@ def _render_item(path: Path, index: int, total: int, marked: set[Path]) -> None:
     sys.stdout.flush()
 
 
+def _style_completer(styles: list[str]):
+    """Build a readline completer function that offers existing style names."""
+    def complete(text: str, state: int) -> str | None:
+        matches = [s for s in styles if s.startswith(text)]
+        return matches[state] if state < len(matches) else None
+    return complete
+
+
+def _prompt_larp_style() -> str | None:
+    """Prompt for which style to file the current item's caption under; None if cancelled.
+
+    Tab-completes over existing styles when readline is available (not on
+    Windows without pyreadline), but typing a new name still works to create
+    a new style.
+    """
+    styles = larp.list_styles()
+    if styles:
+        print("Styles: " + ", ".join(styles))
+
+    try:
+        import readline
+    except ImportError:
+        readline = None
+
+    if readline is not None:
+        old_completer = readline.get_completer()
+        old_delims = readline.get_completer_delims()
+        readline.set_completer(_style_completer(styles))
+        readline.set_completer_delims("")
+        readline.parse_and_bind("tab: complete")
+
+    try:
+        style = input("save as style (Tab completes)> ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    finally:
+        if readline is not None:
+            readline.set_completer(old_completer)
+            readline.set_completer_delims(old_delims)
+    return style or None
+
+
 def pick(source_dir: Path | None = None) -> list[Path]:
     """Browse source_dir one item at a time and return whatever got marked with 's'.
 
@@ -158,7 +174,7 @@ def pick(source_dir: Path | None = None) -> list[Path]:
     marked = _selected_paths() & available
     _render_item(files[index], index, len(files), marked)
     while True:
-        key = _read_key()
+        key = termui.read_key()
         if key in ("\r", "\n", "q", "\x03"):
             break
         elif key in ("left", "up"):
@@ -179,6 +195,20 @@ def pick(source_dir: Path | None = None) -> list[Path]:
                 marked.add(resolved)
         elif key == "o":
             open_native(files[index])
+        elif key == "c":
+            caption = find_caption(files[index].resolve()).strip()
+            print()
+            if not caption:
+                print("No caption on this item -- nothing to save.")
+                input("Press Enter to continue...")
+            else:
+                style = _prompt_larp_style()
+                if style is not None:
+                    try:
+                        larp.add_template(style, caption)
+                    except ValueError as exc:
+                        print(f"Could not save: {exc}")
+                        input("Press Enter to continue...")
         else:
             continue
         _render_item(files[index], index, len(files), marked)

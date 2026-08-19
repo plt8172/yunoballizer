@@ -11,15 +11,16 @@ authors of posts you saved. Fetch stores no media or captions; anonymous account
 crawling handles all downloads.
 
 ```
-[once/switch]         yuno auth login -> imports & saves an Instagram session
-                                              |
-[manual, uses saved   yuno fetch      -> adds saved-post authors to accounts.txt
- session]                                    |
-[frequent, no login]  yuno download   -> downloads accounts.txt + urls.txt across
-                                         Instagram/YouTube/TikTok
-                                              |
-[manual, no login]    yuno expand     -> adds @mentions found in downloaded
-                                         Instagram captions to accounts.txt
+[once/switch]         yuno auth login | imports & saves an Instagram session
+                                      |
+[manual, login]       yuno fetch      | adds saved-post authors to accounts.txt
+                                      |
+[frequent, no login]  yuno download   | downloads accounts.txt + urls.txt across
+                                      | ig/yt and tiktok
+[manual, no login]    yuno select     | a visual tool to select posts/videos manually
+                                      |
+[manual, no login]    yuno expand     | adds @mentions found in downloaded
+                                      | captions to accounts.txt
 ```
 
 `yuno profile` builds a content profile from downloaded Instagram captions,
@@ -35,12 +36,10 @@ pip install -e .
 Installing registers both the `yunoballizer` and `yuno` commands on PATH
 (no manual alias needed).
 
-To use Claude API-based curation:
-
-```bash
-pip install -e ".[curate]"
-export ANTHROPIC_API_KEY=sk-ant-...
-```
+`yuno curate`'s optional AI-assisted judgment (used when rule-based
+scoring is ambiguous) uses the same LLM setup as `yuno larp` -- no extra
+install, no separate key. Run `yuno brain config` once to set it up; see
+the [`yuno brain`](#yuno-brain-ai-provider-profiles) section below.
 
 ## First-time setup
 
@@ -60,18 +59,6 @@ Fill in the account list files:
 ## Usage
 
 ```bash
-yuno download            # No login required. Crawls accounts.txt + urls.txt (Instagram/YouTube/TikTok)
-yuno download @nasa      # Harvest a single account across all three platforms instead of the configured lists
-yuno download -l 5       # Cap harvest at 5 posts per account (default: 20)
-yuno download -s 5 -l 10 # Skip the newest 5 posts, then harvest the next 10 per account
-yuno fetch                # Uses the active saved session. Adds saved-post authors to Instagram accounts.txt; downloads nothing
-yuno expand               # No login required. Adds @mentions from downloaded Instagram captions
-yuno profile              # Build/refresh a content profile from downloaded Instagram captions
-yuno curate               # Curate downloaded posts against the content profile
-yuno select                # Browse review/ one item at a time: arrows to move, s to select, o to open natively
-yuno export                # Copy/hardlink everything you've selected into selected/
-yuno all                  # download + curate (cron entry point)
-
 yuno auth login               # Open a login window driving Chrome (default); falls back to cookie import if that fails
 yuno auth login -b edge       # Same, driving Edge instead
 yuno auth login -b firefox    # Not chrome/edge: skips the login window, imports cookies from that browser instead
@@ -81,10 +68,157 @@ yuno auth status -c           # Also verify each saved session is still logged i
 yuno auth switch <user>       # Switch which saved session `fetch` uses, without touching the browser
 yuno auth switch              # No user given: cycle to the next saved session (like `gh auth switch`)
 yuno auth logout [<user>...]  # Remove one or more saved sessions (defaults to just the active one)
+
+yuno brain config groq   # Interactively save a named AI provider profile (API key hidden) and activate it
+yuno brain               # Show the active profile
+yuno brain list          # List saved profiles, marking the active one with *
+yuno brain switch <name> # Switch which saved profile larp/curate use
+yuno brain remove <name> # Delete a saved profile
+
+yuno fetch                # Uses the active saved session. Adds saved-post authors to Instagram accounts.txt; downloads nothing
+
+yuno download            # No login required. Crawls accounts.txt + urls.txt (Instagram/YouTube/TikTok)
+yuno download @nasa      # Harvest a single account across all three platforms instead of the configured lists
+yuno download -l 5       # Cap harvest at 5 posts per account (default: 20)
+yuno download -s 5 -l 10 # Skip the newest 5 posts, then harvest the next 10 per account
+
+yuno select                # Browse review/ one item at a time: s to select, c to save a larp template, o to open natively
+yuno export                # Copy/hardlink everything you've selected into selected/
+
+yuno expand               # No login required. Adds @mentions from downloaded Instagram captions
+yuno profile              # Build/refresh a content profile from downloaded Instagram captions
+yuno curate               # Curate downloaded posts against the content profile
+
+yuno all                  # download + curate (cron entry point)
+
+yuno larp --style casual  # Generate comment/caption text from a saved style's templates
 ```
 
 `-s`/`--skip` and `-l`/`--limit` mean the same thing across all three
 platforms: skip the N most recent posts per account, then harvest the next L.
+
+### `yuno larp`: comment/caption text generation
+
+`yuno larp` generates text for comments or captions in the style of your
+own material. It sends your saved example templates as few-shot examples
+to an LLM and asks it to write one new example in the same voice -- by
+default a free-tier Llama model via [Groq](https://console.groq.com)'s
+API, called over plain HTTPS with just the Python standard library (no
+new required dependency), but you do need to run `yuno brain config`
+once first -- see [`yuno brain`](#yuno-brain-ai-provider-profiles) below.
+
+Templates are grouped into named styles (aliases) so different
+voices/formats -- a chatty travel-caption style vs. a terse one-liner
+style, say -- don't blend into an incoherent average. Each style is its
+own file under `$CONFIG_DIR/larp/styles/<name>.txt` (blank-line-separated
+template blocks, `#` for comments; editing it directly works too).
+
+Templates get there two ways: the `add` subcommand below, or `yuno
+select`'s `c` key, which files the item you're currently looking at --
+its own downloaded caption, not something you type -- into a style you
+pick. A separate action from `s` (picking favorites), not tied to whether
+the current item is selected. The style prompt there tab-completes over
+your existing styles (via `readline`, so not on Windows without
+`pyreadline`) -- keep typing to create a new one instead.
+
+```bash
+yuno brain config   # first time only: save a free Groq key (https://console.groq.com/keys)
+
+yuno larp add casual "오늘도 열심히 달렸다 #daily #run"   # save a template under the "casual" style
+yuno larp list                                            # list saved styles and their template counts
+yuno larp list casual                                     # browse "casual"'s saved templates one at a time (arrow keys)
+yuno larp remove casual 0                                 # remove a template by index
+yuno larp rename casual laid-back                         # rename a style (its alias)
+yuno larp delete laid-back                                # delete a style and all its templates
+
+yuno larp --style casual         # generate one text from the "casual" style
+yuno larp --style casual -n 5    # generate 5
+yuno larp --model llama-3.1-8b-instant   # faster, smaller model
+yuno larp --style casual --language English   # keep the style, change the output language
+yuno larp --max-tokens 1500   # give a reasoning/thinking model more room to finish
+```
+
+`--style` can be omitted if you only have one saved style (it's used
+automatically); with two or more styles saved, `--style` is required so
+styles never mix silently. Model: `--model`, then whatever's configured
+(see below), then `llama-3.3-70b-versatile` as the built-in default.
+
+`--max-tokens` caps how many output tokens a generation can use (default:
+800). Some free models -- especially "reasoning"/"thinking" ones -- spend
+part or all of that budget on hidden reasoning before producing visible
+output; if `yuno larp` reports a model ran out of budget without
+producing a response, raise `--max-tokens`, or switch to a plain
+instruct/chat model instead.
+
+`--language`/`-l` keeps the chosen style's voice and format but asks the
+model to write the output in a different language than the saved
+examples -- e.g. templates written in Korean, generated in English. Leave
+it unset to just match whatever language the examples themselves are in.
+
+Groq's free tier has rate limits (requests per minute/day); for occasional
+personal use this comfortably fits, but if you hit one, `yuno larp` tells
+you directly instead of failing silently.
+
+### `yuno brain`: AI provider profiles
+
+`yuno larp` and `yuno curate` share one AI provider setup, managed like
+`yuno auth` manages Instagram sessions: save one or more named profiles,
+switch between them, and whichever is active is what larp/curate use --
+no CLI flags, no shell exports required.
+
+```bash
+yuno brain config groq        # save a profile named "groq" (API key hidden while typing) and activate it
+yuno brain                    # show the active profile
+yuno brain list                # list saved profiles, marking the active one with *
+yuno brain switch <name>       # switch which saved profile is active
+yuno brain remove <name>       # delete a saved profile
+```
+
+`yuno brain config <name>` prompts for an API key (via `getpass`, so it's
+never echoed to the screen or left in shell history), then optionally a
+model name and an API base URL -- leave either blank to use the built-in
+default (Groq, `llama-3.3-70b-versatile`). Profiles are stored under
+`$CONFIG_DIR/brain/profiles/<name>.json` with `0600` permissions (the
+directory is `0700`), the same way `yuno auth` locks down saved Instagram
+sessions.
+
+Any provider that speaks the same OpenAI-compatible chat completions
+format works, not just Groq -- OpenRouter, Together AI, Fireworks, a
+local vLLM/LM Studio server, etc. Save each as its own named profile with
+its own key/model/endpoint, then `yuno brain switch <name>` to change
+which one larp/curate use:
+
+```bash
+yuno brain config openrouter
+# API key for 'openrouter' (hidden, ...): sk-or-...
+# Model [Enter for llama-3.3-70b-versatile]: meta-llama/llama-3.1-8b-instruct:free
+# API base URL [Enter for https://api.groq.com/openai/v1/chat/completions]: https://openrouter.ai/api/v1/chat/completions
+
+yuno brain switch groq   # back to the Groq profile
+```
+
+Providers with a genuinely different request format (not OpenAI-style
+chat completions -- e.g. Anthropic's Messages API, Ollama's native
+`/api/generate`) aren't supported this way.
+
+Precedence, most to least specific: a CLI flag (`--model`/`--api-base` on
+`yuno larp`) beats an environment variable (`YUNOBALLIZER_API_KEY`/
+`YUNOBALLIZER_MODEL`/`YUNOBALLIZER_API_BASE`, whether `export`ed or
+loaded from `$CONFIG_DIR/.env`) beats the active `yuno brain` profile
+beats the built-in default. The `.env`/`export` route still works if you
+prefer it (e.g. for scripted/non-interactive setup) -- `$CONFIG_DIR/.env`
+is `KEY=value`, one per line, `#` comments, quotes around the value
+optional, read once at startup:
+
+```
+# ~/.config/yunoballizer/.env
+YUNOBALLIZER_API_KEY=gsk_...
+YUNOBALLIZER_MODEL=llama-3.1-8b-instant
+```
+
+Either way, the key never leaves your machine except in the request
+itself -- yunoballizer doesn't store or log it beyond the profile file
+you asked it to save.
 
 ### Instagram login (`yuno auth`)
 
@@ -198,12 +332,20 @@ Using the defaults, the layout looks like this:
 │   └── sessions/            # one file per `yuno auth login`, named <username>.session
 ├── youtube/accounts.txt
 ├── tiktok/accounts.txt
-└── urls.txt
+├── urls.txt
+├── larp/styles/
+│   ├── casual.txt
+│   └── formal.txt
+├── brain/
+│   ├── active_profile       # name of the profile larp/curate currently use
+│   └── profiles/            # one file per `yuno brain config`, named <name>.json
+└── .env                      # optional -- see `yuno brain`/`$CONFIG_DIR/.env` above
 ```
 
-Session files hold cookies, not your password, and are written `0600`
-(the containing `sessions/` directory `0700`) -- see [Instagram
-login](#instagram-login-yuno-auth) above for details.
+Session and brain-profile files hold cookies/keys, not your password, and
+are written `0600` (their containing directories `0700`) -- see
+[Instagram login](#instagram-login-yuno-auth) and [`yuno
+brain`](#yuno-brain-ai-provider-profiles) above for details.
 
 **`sources/`** is the source of truth. Every downloaded post is a single
 self-contained directory holding its media, caption, and metadata together --
@@ -239,6 +381,14 @@ nothing about selecting a file changes `review/` or `sources/`. Run
 files (hardlinked when `selected/` shares a filesystem with `sources/`,
 copied otherwise), not symlinks, so `selected/` works with any downstream
 tool, sync client, or mobile app without special-casing links.
+
+`c` files the current item's own downloaded caption as a `yuno larp`
+template: it prompts for which style to save it under (existing ones are
+listed for reference), then appends the caption to that style's file, same
+as `yuno larp add`. Nothing to type -- if the item has no caption there's
+nothing to save. It's a completely separate action from `s` -- it never
+touches `selection_log.json`, doesn't require the current item to be
+selected, and selecting an item never writes a template.
 
 One item at a time is a deliberate choice, not just simplicity for its own
 sake: an earlier version used [fzf](https://github.com/junegunn/fzf) with a

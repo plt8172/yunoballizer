@@ -135,12 +135,20 @@ yuno larp --style casual         # generate one text from the "casual" style
 yuno larp --style casual -n 5    # generate 5
 yuno larp --model llama-3.1-8b-instant   # faster, smaller model
 yuno larp --style casual --language English   # keep the style, change the output language
+yuno larp --max-tokens 1500   # give a reasoning/thinking model more room to finish
 ```
 
 `--style` can be omitted if you only have one saved style (it's used
 automatically); with two or more styles saved, `--style` is required so
 styles never mix silently. Model: `--model`, then whatever's configured
 (see below), then `llama-3.3-70b-versatile` as the built-in default.
+
+`--max-tokens` caps how many output tokens a generation can use (default:
+800). Some free models -- especially "reasoning"/"thinking" ones -- spend
+part or all of that budget on hidden reasoning before producing visible
+output; if `yuno larp` reports a model ran out of budget without
+producing a response, raise `--max-tokens`, or switch to a plain
+instruct/chat model instead.
 
 `--language`/`-l` keeps the chosen style's voice and format but asks the
 model to write the output in a different language than the saved

@@ -7,7 +7,7 @@ import logging
 import sys
 import zlib
 
-from . import auth, config, expand, fetch, prune, storage
+from . import auth, config, expand, fetch, llm, prune, storage
 from . import brain as brain_mod
 from . import larp as larp_mod
 from . import profile as profile_mod
@@ -159,6 +159,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Request timeout in seconds (default: 30)",
     )
     larp_parser.add_argument(
+        "--max-tokens", type=int, default=llm.DEFAULT_MAX_TOKENS,
+        help=f"Max output tokens per generated text (default: {llm.DEFAULT_MAX_TOKENS}). "
+             "Raise this if a model cuts off before finishing -- reasoning/thinking "
+             "models especially can spend most of the budget on hidden reasoning "
+             "before producing visible output",
+    )
+    larp_parser.add_argument(
         "-l", "--language", default=None,
         help="Language to generate in (e.g. 'English', 'Korean'), overriding the "
              "examples' own language while keeping their style. Default: whatever "
@@ -253,6 +260,7 @@ def _run_larp(args: argparse.Namespace) -> None:
             api_base=args.api_base,
             language=args.language,
             timeout=args.timeout,
+            max_tokens=args.max_tokens,
         )
         for text in texts:
             print(text)

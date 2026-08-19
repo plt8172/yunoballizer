@@ -239,6 +239,32 @@ class GenerateTests(unittest.TestCase):
 
             self.assertEqual(mock_call.call_args.kwargs["api_base"], custom_base)
 
+    def test_generate_defaults_max_tokens_to_llm_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            styles_dir = Path(tmpdir) / "larp" / "styles"
+            with (
+                patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
+                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.llm, "call", return_value="generated") as mock_call,
+            ):
+                larp.add_template("casual", "example one")
+                larp.generate(style="casual")
+
+            self.assertEqual(mock_call.call_args.kwargs["max_tokens"], larp.llm.DEFAULT_MAX_TOKENS)
+
+    def test_generate_passes_max_tokens_through_to_llm_call(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            styles_dir = Path(tmpdir) / "larp" / "styles"
+            with (
+                patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
+                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.llm, "call", return_value="generated") as mock_call,
+            ):
+                larp.add_template("casual", "example one")
+                larp.generate(style="casual", max_tokens=1500)
+
+            self.assertEqual(mock_call.call_args.kwargs["max_tokens"], 1500)
+
     def test_generate_passes_language_into_the_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             styles_dir = Path(tmpdir) / "larp" / "styles"

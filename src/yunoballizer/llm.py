@@ -22,6 +22,10 @@ API_KEY_ENV = "YUNOBALLIZER_API_KEY"
 MODEL_ENV = "YUNOBALLIZER_MODEL"
 DEFAULT_MODEL = "llama-3.3-70b-versatile"
 DEFAULT_TIMEOUT = 30
+# Generous enough that a reasoning/thinking model (which can spend hundreds
+# of tokens on hidden reasoning before it says anything visible) still has
+# room left to produce an actual answer, not just get cut off mid-thought.
+DEFAULT_MAX_TOKENS = 800
 
 
 class LlmError(Exception):
@@ -58,7 +62,7 @@ def call(
     api_key: str,
     model: str | None = None,
     api_base: str | None = None,
-    max_tokens: int = 200,
+    max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = 0.9,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> str:

@@ -209,6 +209,7 @@ def generate(
     language: str | None = None,
     timeout: int = llm.DEFAULT_TIMEOUT,
     max_examples: int = DEFAULT_MAX_EXAMPLES,
+    max_tokens: int = llm.DEFAULT_MAX_TOKENS,
 ) -> list[str]:
     api_key = llm.resolve_api_key()
     if not api_key:
@@ -231,7 +232,10 @@ def generate(
     results = []
     for _ in range(count):
         try:
-            results.append(llm.call(prompt, api_key=api_key, model=model, api_base=api_base, timeout=timeout))
+            results.append(llm.call(
+                prompt, api_key=api_key, model=model, api_base=api_base,
+                timeout=timeout, max_tokens=max_tokens,
+            ))
         except llm.LlmError as exc:
             raise SystemExit(str(exc)) from exc
     return results

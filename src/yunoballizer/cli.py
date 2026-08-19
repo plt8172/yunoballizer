@@ -7,6 +7,7 @@ import logging
 import sys
 import zlib
 
+from . import accounts as accounts_mod
 from . import auth, config, expand, fetch, llm, prune, storage
 from . import brain as brain_mod
 from . import larp as larp_mod
@@ -97,6 +98,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("expand", help="No login required. Expands Instagram accounts.txt from downloaded caption mentions")
+
+    accounts_parser = sub.add_parser("accounts", help="View or edit the per-platform accounts.txt lists")
+    accounts_sub = accounts_parser.add_subparsers(dest="accounts_command", required=True)
+
+    accounts_list_parser = accounts_sub.add_parser("list", help="List monitored accounts")
+    accounts_list_parser.add_argument(
+        "platform", nargs="?", choices=accounts_mod.PLATFORMS, default=None,
+        help="Limit to one platform (default: all)",
+    )
+
+    accounts_add_parser = accounts_sub.add_parser("add", help="Add an account to monitor")
+    accounts_add_parser.add_argument("platform", choices=accounts_mod.PLATFORMS)
+    accounts_add_parser.add_argument("username")
+
+    accounts_remove_parser = accounts_sub.add_parser("remove", help="Stop monitoring an account")
+    accounts_remove_parser.add_argument("platform", choices=accounts_mod.PLATFORMS)
+    accounts_remove_parser.add_argument("username")
     sub.add_parser("profile", help="Build/refresh the content profile from downloaded Instagram captions")
     sub.add_parser("curate", help="Curate new posts against the content profile")
 
@@ -303,6 +321,20 @@ def main(argv: list[str] | None = None) -> None:
             auth.logout(args.username)
     elif args.command == "expand":
         _run_expand()
+    elif args.command == "accounts":
+        if args.accounts_command == "list":
+            for platform, names in accounts_mod.list_accounts(args.platform).items():
+                print(f"{platform} ({len(names)}):")
+                for name in names:
+                    print(f"  {name}")
+        elif args.accounts_command == "add":
+            added = accounts_mod.add(args.platform, args.username)
+            username = args.username.strip().lstrip("@").lower()
+            print(f"{'Added' if added else 'Already present:'} @{username} ({args.platform})")
+        elif args.accounts_command == "remove":
+            username = args.username.strip().lstrip("@").lower()
+            removed = accounts_mod.remove(args.platform, args.username)
+            print(f"{'Removed' if removed else 'Not found:'} @{username} ({args.platform})")
     elif args.command == "download":
         accounts = None
         if args.target:

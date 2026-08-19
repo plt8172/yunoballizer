@@ -153,3 +153,19 @@ def append_line(path: Path, value: str) -> bool:
             f.write("\n")
         f.write(value + "\n")
     return True
+
+
+def remove_line(path: Path, value: str) -> bool:
+    """Remove a value from a config file if present. Returns True if actually removed.
+
+    Comments and blank lines are left untouched -- only lines that exactly
+    match value (after stripping) are dropped.
+    """
+    if not path.exists():
+        return False
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept = [line for line in lines if line.strip() != value]
+    if len(kept) == len(lines):
+        return False
+    path.write_text("".join(line + "\n" for line in kept), encoding="utf-8")
+    return True

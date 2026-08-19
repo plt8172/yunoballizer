@@ -56,6 +56,7 @@ def harvest(
             {"playliststart": skip + 1, "playlistend": skip + account_limit, **date_opts},
             metadata_template=str(out_dir / "%(uploader)s" / "%(id)s" / "metadata.%(ext)s"),
             caption_template=str(out_dir / "%(uploader)s" / "%(id)s" / "caption.%(ext)s"),
+            on_item_done=storage.refresh_new_ytdlp_post,
         )
         if sleep_seconds:
             time.sleep(sleep_seconds)

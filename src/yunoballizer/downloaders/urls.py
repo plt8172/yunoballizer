@@ -25,6 +25,7 @@ def harvest() -> None:
         archive,
         metadata_template=str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "metadata.%(ext)s"),
         caption_template=str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "caption.%(ext)s"),
+        on_item_done=storage.refresh_new_ytdlp_post,
     )
 
     storage.organize_ytdlp_tree(out_dir)

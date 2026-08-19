@@ -111,6 +111,25 @@ class OrganizeYtdlpTests(unittest.TestCase):
             for uploader, video_id in (("alice", "v1"), ("bob", "v2")):
                 self.assertTrue((root / uploader / video_id / "metadata.json.xz").exists())
 
+    def test_refresh_new_ytdlp_post_organizes_and_adds_to_review_immediately(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir) / "sources"
+            review_dir = Path(tmpdir) / "review"
+            post_dir = sources_dir / "youtube" / "creator" / "vid1"
+            _write(post_dir / "video.mp4", "x")
+            _write(post_dir / "metadata.info.json", "{}")
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "REVIEW_DIR", review_dir),
+            ):
+                storage.refresh_new_ytdlp_post(post_dir)
+
+                self.assertTrue((post_dir / "metadata.json.xz").exists())
+                links = list(review_dir.iterdir())
+                self.assertEqual(len(links), 1)
+                self.assertTrue(links[0].resolve() == (post_dir / "video.mp4").resolve())
+
 
 class FindCaptionTests(unittest.TestCase):
     def test_reads_sibling_caption_txt(self) -> None:

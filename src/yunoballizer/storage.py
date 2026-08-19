@@ -179,6 +179,17 @@ def organize_ytdlp_tree(root: Path) -> None:
             organize_ytdlp_post_dir(directory)
 
 
+def refresh_new_ytdlp_post(post_dir: Path) -> None:
+    """Organize one freshly-downloaded yt-dlp post dir and add it to review/ right away.
+
+    Used as a yt-dlp progress-hook callback so a post shows up in review/ as
+    soon as it finishes downloading, instead of only after the whole
+    account/playlist (or an interrupted download run) completes.
+    """
+    organize_ytdlp_post_dir(post_dir)
+    refresh_review()
+
+
 def find_caption(media_path: Path) -> str:
     """A post's caption lives beside its media, in the same bundle directory."""
     post_dir = media_path.parent

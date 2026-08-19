@@ -104,6 +104,13 @@ yuno larp --style casual  # Generate comment/caption text from a saved style's t
 `-s`/`--skip` and `-l`/`--limit` mean the same thing across all three
 platforms: skip the N most recent posts per account, then harvest the next L.
 
+`review/` is updated incrementally as `download` runs, not just once at the
+very end: each post lands there as soon as it (or, for Instagram, its whole
+account) finishes downloading. So interrupting a long `download` run --
+Ctrl-C, a dropped connection, a rate limit -- doesn't lose visibility into
+what already finished; `yuno select` can browse it right away instead of
+waiting for the entire run to complete.
+
 ### `yuno larp`: comment/caption text generation
 
 `yuno larp` generates text for comments or captions in the style of your

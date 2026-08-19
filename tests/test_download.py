@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from yunoballizer import cli, storage
-from yunoballizer.downloaders import instagram, tiktok, youtube, ytdlp_helper
+from yunoballizer.downloaders import instagram, tiktok, urls, youtube, ytdlp_helper
 from yunoballizer.downloaders.budget import TotalBudget
 
 
@@ -51,6 +51,50 @@ class YtdlpHelperTests(unittest.TestCase):
         self.assertTrue(options["writedescription"])
         self.assertFalse(options["allow_playlist_files"])
         ydl.download.assert_called_once_with(["https://example.test/post"])
+
+    def test_on_item_done_fires_once_per_finished_file_with_its_post_dir(self) -> None:
+        ydl = Mock()
+        ydl.__enter__ = Mock(return_value=ydl)
+        ydl.__exit__ = Mock(return_value=False)
+        on_item_done = Mock()
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(ytdlp_helper.yt_dlp, "YoutubeDL", return_value=ydl) as youtube_dl,
+        ):
+            root = Path(tmpdir)
+            ytdlp_helper.download(
+                "https://example.test/post",
+                str(root / "%(id)s" / "video.%(ext)s"),
+                root / "state" / "archive.txt",
+                on_item_done=on_item_done,
+            )
+
+        hook = youtube_dl.call_args.args[0]["progress_hooks"][0]
+        post_dir = root / "vid1"
+
+        hook({"status": "downloading", "filename": str(post_dir / "video.mp4")})
+        on_item_done.assert_not_called()
+
+        hook({"status": "finished", "filename": str(post_dir / "video.mp4")})
+        on_item_done.assert_called_once_with(post_dir)
+
+    def test_no_progress_hooks_option_when_on_item_done_omitted(self) -> None:
+        ydl = Mock()
+        ydl.__enter__ = Mock(return_value=ydl)
+        ydl.__exit__ = Mock(return_value=False)
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(ytdlp_helper.yt_dlp, "YoutubeDL", return_value=ydl) as youtube_dl,
+        ):
+            ytdlp_helper.download(
+                "https://example.test/post",
+                str(Path(tmpdir) / "video.%(ext)s"),
+                Path(tmpdir) / "state" / "archive.txt",
+            )
+
+        self.assertNotIn("progress_hooks", youtube_dl.call_args.args[0])
 
 
 class CliParserTests(unittest.TestCase):
@@ -272,6 +316,29 @@ class InstagramDownloadTests(unittest.TestCase):
 
         organize.assert_called_once_with(Path(tmpdir) / "instagram" / "nasa")
 
+    def test_refresh_review_runs_after_each_account_not_just_at_the_end(self) -> None:
+        # So an interrupted multi-account run still leaves already-finished
+        # accounts' posts visible in review/, instead of only after the
+        # whole run (across every platform) completes.
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(instagram.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(
+                instagram.instaloader, "Instaloader",
+                return_value=SimpleNamespace(context=object(), download_profiles=Mock(), compress_json=True),
+            ),
+            patch.object(
+                instagram.instaloader.Profile, "from_username",
+                side_effect=[_FakeProfile("a"), _FakeProfile("b")],
+            ),
+            patch.object(instagram.time, "sleep"),
+            patch.object(instagram.storage, "organize_instagram_account"),
+            patch.object(instagram.storage, "refresh_review") as refresh_review,
+        ):
+            instagram.harvest(accounts=["a", "b"], sleep_seconds=0)
+
+        self.assertEqual(refresh_review.call_count, 2)
+
     def test_post_filter_honors_since_until_and_media_type(self) -> None:
         with (
             tempfile.TemporaryDirectory() as tmpdir,
@@ -440,6 +507,45 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
             tiktok.harvest(accounts=["nasa"], media_type="photo")
 
         download.assert_not_called()
+
+    def test_youtube_wires_up_incremental_review_refresh(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(youtube.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(youtube.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(youtube, "download") as download,
+            patch.object(youtube.storage, "organize_ytdlp_tree"),
+        ):
+            youtube.harvest(accounts=["@nasa"])
+
+        self.assertEqual(download.call_args.kwargs["on_item_done"], youtube.storage.refresh_new_ytdlp_post)
+
+    def test_tiktok_wires_up_incremental_review_refresh(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(tiktok.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(tiktok.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(tiktok, "download") as download,
+            patch.object(tiktok.storage, "organize_ytdlp_tree"),
+            patch.object(tiktok.time, "sleep"),
+        ):
+            tiktok.harvest(accounts=["nasa"])
+
+        self.assertEqual(download.call_args.kwargs["on_item_done"], tiktok.storage.refresh_new_ytdlp_post)
+
+    def test_urls_wires_up_incremental_review_refresh(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
+            patch.object(urls.config, "SOURCES_DIR", Path(tmpdir) / "sources"),
+            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(urls, "download") as download,
+            patch.object(urls.storage, "organize_ytdlp_tree"),
+        ):
+            (Path(tmpdir) / "urls.txt").write_text("https://example.test/post\n")
+            urls.harvest()
+
+        self.assertEqual(download.call_args.kwargs["on_item_done"], urls.storage.refresh_new_ytdlp_post)
 
     def test_tiktok_budget_caps_playlistend_and_stops_once_exhausted(self) -> None:
         with (

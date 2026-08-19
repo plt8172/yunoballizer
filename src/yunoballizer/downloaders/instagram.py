@@ -132,5 +132,11 @@ def harvest(
         except instaloader.InstaloaderException as e:
             logger.error("Failed to harvest %s: %s", account, e)
         finally:
+            # Instaloader has no per-post-finished callback, so this is the
+            # finest granularity available here: review/ picks up a whole
+            # account's newly downloaded posts as soon as that account is
+            # done, rather than waiting for every account across every
+            # platform to finish before anything is browsable.
             storage.organize_instagram_account(account_dir)
+            storage.refresh_review()
         time.sleep(sleep_seconds)

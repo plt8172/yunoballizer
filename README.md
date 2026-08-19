@@ -54,7 +54,7 @@ Fill in the account list files:
 | `instagram/accounts.txt` | Instagram accounts to crawl | Not required |
 | `youtube/accounts.txt` | YouTube accounts' Shorts tab | Not required |
 | `tiktok/accounts.txt` | TikTok accounts (hashtags not supported) | Not required |
-| `urls.txt` | Individual TikTok/YouTube URLs to download | Not required |
+| `urls.txt` | Individual TikTok/YouTube/Instagram URLs to download | Not required |
 
 ## Usage
 
@@ -439,6 +439,10 @@ pip uninstall yunoballizer
 
 ## Notes
 
+- Instagram links in `urls.txt` (`/p/`, `/reel/`, `/tv/`) are downloaded via
+  Instaloader, not yt-dlp -- yt-dlp's Instagram extractor can't download
+  photo posts at all and has been unreliable for video. Everything else in
+  `urls.txt` still goes through yt-dlp as before.
 - TikTok hashtag/trending discovery isn't supported at all right now -- the
   yt-dlp extractor for it is broken upstream, independent of login.
 - Even anonymous harvesting can trigger a temporary IP-level block if run

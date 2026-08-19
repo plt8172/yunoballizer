@@ -445,6 +445,74 @@ class InstagramDownloadTests(unittest.TestCase):
                     self.assertFalse(stray.exists())
 
 
+class InstagramUrlDownloadTests(unittest.TestCase):
+    def test_is_instagram_url_matches_post_reel_and_tv_links(self) -> None:
+        for url in (
+            "https://www.instagram.com/p/ABC123xyz/",
+            "https://instagram.com/reel/ABC123xyz",
+            "https://www.instagram.com/tv/ABC123xyz/?hl=en",
+        ):
+            with self.subTest(url=url):
+                self.assertTrue(instagram.is_instagram_url(url))
+
+    def test_is_instagram_url_rejects_other_platforms(self) -> None:
+        for url in (
+            "https://www.tiktok.com/@nasa/video/1234",
+            "https://www.youtube.com/shorts/abc123",
+            "https://www.instagram.com/nasa/",  # a profile, not a post
+        ):
+            with self.subTest(url=url):
+                self.assertFalse(instagram.is_instagram_url(url))
+
+    def test_harvest_urls_downloads_post_by_shortcode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir)
+            post = SimpleNamespace(owner_username="nasa", shortcode="ABC123", mediacount=1)
+            loader = SimpleNamespace(context=object(), download_post=Mock())
+
+            with (
+                patch.object(instagram.config, "SOURCES_DIR", sources_dir),
+                patch.object(instagram, "_new_loader", return_value=loader),
+                patch.object(instagram.instaloader.Post, "from_shortcode", return_value=post),
+                patch.object(instagram.storage, "organize_instagram_account") as organize,
+                patch.object(instagram.storage, "refresh_review") as refresh_review,
+            ):
+                instagram.harvest_urls(["https://www.instagram.com/p/ABC123/"])
+
+            loader.download_post.assert_called_once_with(post, target="nasa")
+            organize.assert_called_once_with(sources_dir / "instagram" / "nasa")
+            refresh_review.assert_called_once()
+
+    def test_harvest_urls_skips_a_post_already_fully_downloaded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir)
+            post_dir = sources_dir / "instagram" / "nasa" / "ABC123"
+            (post_dir / "image.jpg").parent.mkdir(parents=True)
+            (post_dir / "image.jpg").touch()
+            post = SimpleNamespace(owner_username="nasa", shortcode="ABC123", mediacount=1)
+            loader = SimpleNamespace(context=object(), download_post=Mock())
+
+            with (
+                patch.object(instagram.config, "SOURCES_DIR", sources_dir),
+                patch.object(instagram, "_new_loader", return_value=loader),
+                patch.object(instagram.instaloader.Post, "from_shortcode", return_value=post),
+            ):
+                instagram.harvest_urls(["https://www.instagram.com/p/ABC123/"])
+
+            loader.download_post.assert_not_called()
+
+    def test_harvest_urls_logs_and_continues_on_unparseable_url(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(instagram.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(instagram, "_new_loader"),
+            patch.object(instagram.instaloader.Post, "from_shortcode") as from_shortcode,
+        ):
+            instagram.harvest_urls(["https://example.test/not-instagram"])
+
+        from_shortcode.assert_not_called()
+
+
 class YoutubeTiktokDownloadTests(unittest.TestCase):
     def test_youtube_uses_one_based_skip_range_and_id_scoped_templates(self) -> None:
         with (
@@ -562,6 +630,59 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
         download.assert_called_once()
         self.assertEqual(download.call_args.args[3]["playlistend"], 3)
         self.assertTrue(budget.exhausted)
+
+
+class UrlsHarvestSplitTests(unittest.TestCase):
+    def test_routes_instagram_urls_to_instaloader_and_the_rest_to_yt_dlp(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
+            patch.object(urls.config, "SOURCES_DIR", Path(tmpdir) / "sources"),
+            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(urls, "download") as download,
+            patch.object(urls.storage, "organize_ytdlp_tree"),
+            patch.object(urls.instagram, "harvest_urls") as harvest_urls,
+        ):
+            (Path(tmpdir) / "urls.txt").write_text(
+                "https://www.instagram.com/p/ABC123/\n"
+                "https://www.tiktok.com/@nasa/video/1\n"
+            )
+            urls.harvest()
+
+        harvest_urls.assert_called_once_with(["https://www.instagram.com/p/ABC123/"])
+        download.assert_called_once()
+        self.assertEqual(download.call_args.args[0], ["https://www.tiktok.com/@nasa/video/1"])
+
+    def test_skips_yt_dlp_entirely_when_every_url_is_instagram(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
+            patch.object(urls.config, "SOURCES_DIR", Path(tmpdir) / "sources"),
+            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(urls, "download") as download,
+            patch.object(urls.instagram, "harvest_urls") as harvest_urls,
+        ):
+            (Path(tmpdir) / "urls.txt").write_text("https://www.instagram.com/p/ABC123/\n")
+            urls.harvest()
+
+        harvest_urls.assert_called_once_with(["https://www.instagram.com/p/ABC123/"])
+        download.assert_not_called()
+
+    def test_skips_instaloader_entirely_when_no_url_is_instagram(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
+            patch.object(urls.config, "SOURCES_DIR", Path(tmpdir) / "sources"),
+            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(urls, "download") as download,
+            patch.object(urls.storage, "organize_ytdlp_tree"),
+            patch.object(urls.instagram, "harvest_urls") as harvest_urls,
+        ):
+            (Path(tmpdir) / "urls.txt").write_text("https://www.tiktok.com/@nasa/video/1\n")
+            urls.harvest()
+
+        harvest_urls.assert_not_called()
+        download.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -33,6 +33,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from . import accounts as accounts_mod
 from . import config, larp, termui
 from .storage import VIDEO_EXTS, find_caption, review_link_name
 
@@ -78,14 +79,29 @@ def _format_size(num_bytes: int) -> str:
     return f"{num_bytes / 1024:.0f} KB"
 
 
-def _render_item(path: Path, index: int, total: int, marked: set[Path]) -> None:
+def _account_action(path: Path, add: bool) -> str:
+    """Add/remove the current item's account to/from its platform's accounts.txt."""
+    platform, account, _post_id, _filename = _describe(path)
+    if platform not in accounts_mod.PLATFORMS or not account or account == "unknown":
+        return "No monitored account for this item."
+    if add:
+        changed = accounts_mod.add(platform, account)
+        return f"{'Added' if changed else 'Already present:'} @{account} ({platform})"
+    changed = accounts_mod.remove(platform, account)
+    return f"{'Removed' if changed else 'Not found:'} @{account} ({platform})"
+
+
+def _render_item(path: Path, index: int, total: int, marked: set[Path], status: str = "") -> None:
     print("\x1b[2J\x1b[H", end="")
     resolved = path.resolve()
     platform, account, post_id, filename = _describe(path)
     size = _format_size(resolved.stat().st_size)
     star = " [SELECTED]" if resolved in marked else ""
     header = f"[{index + 1}/{total}] {platform} / {account} / {post_id} / {filename} ({size}){star}"
-    footer = "<-/-> move   s select/deselect   c save caption as larp template   o open natively   Enter/q finish"
+    footer = (
+        "<-/-> move   s select   d deselect   c save caption as larp template   "
+        "ctrl+s add account   ctrl+d remove account   o open natively   Enter/q finish"
+    )
 
     # Truncate to a single line (not wrapped) so its screen-row cost is
     # predictable -- a caption that wraps across several rows would throw
@@ -113,6 +129,8 @@ def _render_item(path: Path, index: int, total: int, marked: set[Path]) -> None:
         print(caption_line)
     print()
     print(footer)
+    if status:
+        print(status)
     sys.stdout.flush()
 
 
@@ -175,6 +193,7 @@ def pick(source_dir: Path | None = None) -> list[Path]:
     _render_item(files[index], index, len(files), marked)
     while True:
         key = termui.read_key()
+        status = ""
         if key in ("\r", "\n", "q", "\x03"):
             break
         elif key in ("left", "up"):
@@ -188,11 +207,13 @@ def pick(source_dir: Path | None = None) -> list[Path]:
                 continue
             index = new_index
         elif key == "s":
-            resolved = files[index].resolve()
-            if resolved in marked:
-                marked.remove(resolved)
-            else:
-                marked.add(resolved)
+            marked.add(files[index].resolve())
+        elif key == "d":
+            marked.discard(files[index].resolve())
+        elif key == "\x13":  # ctrl+s
+            status = _account_action(files[index], add=True)
+        elif key == "\x04":  # ctrl+d
+            status = _account_action(files[index], add=False)
         elif key == "o":
             open_native(files[index])
         elif key == "c":
@@ -211,7 +232,7 @@ def pick(source_dir: Path | None = None) -> list[Path]:
                         input("Press Enter to continue...")
         else:
             continue
-        _render_item(files[index], index, len(files), marked)
+        _render_item(files[index], index, len(files), marked, status)
 
     return list(marked)
 

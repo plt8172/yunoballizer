@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from yunoballizer import accounts as accounts_mod
 from yunoballizer import config, larp, select, termui
 
 
@@ -191,10 +192,36 @@ class PickTests(unittest.TestCase):
 
             self.assertEqual(set(marked), {real_files[1], real_files[2]})
 
-    def test_toggling_the_same_item_twice_deselects_it(self) -> None:
+    def test_s_does_not_toggle_an_already_selected_item(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, real_files = self._review_dir_with_links(Path(tmpdir), 2)
+            keys = iter(["s", "s", "q"])
+
+            with (
+                patch.object(termui, "read_key", side_effect=keys),
+                patch.object(select, "_render_item"),
+            ):
+                marked = select.pick(source_dir=review_dir)
+
+            self.assertEqual(marked, [real_files[0]])
+
+    def test_d_deselects_a_selected_item(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             review_dir, _ = self._review_dir_with_links(Path(tmpdir), 2)
-            keys = iter(["s", "s", "q"])
+            keys = iter(["s", "d", "q"])
+
+            with (
+                patch.object(termui, "read_key", side_effect=keys),
+                patch.object(select, "_render_item"),
+            ):
+                marked = select.pick(source_dir=review_dir)
+
+            self.assertEqual(marked, [])
+
+    def test_d_on_an_unselected_item_is_a_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            review_dir, _ = self._review_dir_with_links(Path(tmpdir), 2)
+            keys = iter(["d", "q"])
 
             with (
                 patch.object(termui, "read_key", side_effect=keys),
@@ -228,7 +255,7 @@ class PickTests(unittest.TestCase):
                     rendered_marks.append(set(args[3]))
 
                 with (
-                    patch.object(termui, "read_key", side_effect=["s", "q"]),
+                    patch.object(termui, "read_key", side_effect=["d", "q"]),
                     patch.object(select, "_render_item", side_effect=capture_render),
                 ):
                     marked = select.pick(source_dir=review_dir)
@@ -333,6 +360,59 @@ class PickTests(unittest.TestCase):
                 patch("builtins.input", return_value=""),
             ):
                 select.pick(source_dir=review_dir)  # must not raise
+
+    def test_ctrl_s_adds_the_current_items_account(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            sources_dir = root / "sources"
+            post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
+            post_dir.mkdir(parents=True)
+            media = post_dir / "image_01.jpg"
+            media.write_bytes(b"data")
+            review_dir = root / "review"
+            review_dir.mkdir()
+            (review_dir / "link.jpg").symlink_to(media)
+            config_dir = root / "config"
+            keys = iter(["\x13", "q"])
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "CONFIG_DIR", config_dir),
+                patch.object(termui, "read_key", side_effect=keys),
+                patch.object(select, "_render_item") as mock_render,
+            ):
+                select.pick(source_dir=review_dir)
+                self.assertEqual(accounts_mod.list_accounts("instagram"), {"instagram": ["nasa"]})
+
+            self.assertIn("Added @nasa", mock_render.call_args_list[1].args[4])
+
+    def test_ctrl_d_removes_the_current_items_account(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            sources_dir = root / "sources"
+            post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
+            post_dir.mkdir(parents=True)
+            media = post_dir / "image_01.jpg"
+            media.write_bytes(b"data")
+            review_dir = root / "review"
+            review_dir.mkdir()
+            (review_dir / "link.jpg").symlink_to(media)
+            config_dir = root / "config"
+            keys = iter(["\x04", "q"])
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "CONFIG_DIR", config_dir),
+            ):
+                accounts_mod.add("instagram", "nasa")
+                with (
+                    patch.object(termui, "read_key", side_effect=keys),
+                    patch.object(select, "_render_item") as mock_render,
+                ):
+                    select.pick(source_dir=review_dir)
+
+                self.assertEqual(accounts_mod.list_accounts("instagram"), {"instagram": []})
+            self.assertIn("Removed @nasa", mock_render.call_args_list[1].args[4])
 
     def test_empty_review_dir_returns_immediately_without_reading_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -453,6 +533,21 @@ class DescribeTests(unittest.TestCase):
 
             self.assertEqual((platform, account, post_id), ("", "", ""))
             self.assertEqual(filename, "elsewhere.jpg")
+
+
+class AccountActionTests(unittest.TestCase):
+    def test_unsupported_platform_is_a_noop_with_a_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir) / "sources"
+            post_dir = sources_dir / "other" / "youtube" / "nasa" / "id123"
+            post_dir.mkdir(parents=True)
+            media = post_dir / "video.mp4"
+            media.write_bytes(b"data")
+
+            with patch.object(config, "SOURCES_DIR", sources_dir):
+                message = select._account_action(media, add=True)
+
+            self.assertEqual(message, "No monitored account for this item.")
 
 
 class RenderItemTests(unittest.TestCase):

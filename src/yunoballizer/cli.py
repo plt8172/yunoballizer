@@ -120,7 +120,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser(
         "select",
-        help="Browse review/ one item at a time (arrows to move, s to select/deselect, "
+        help="Browse review/ one item at a time (arrows to move, s/d to select/deselect, "
+             "ctrl+s/ctrl+d to add/remove the item's account, "
              "o to open in your OS's default viewer/player, Enter/q to finish)",
     )
     sub.add_parser("export", help="Copy/hardlink selected media into selected/")

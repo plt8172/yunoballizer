@@ -6,35 +6,15 @@ import base64
 import logging
 import sys
 import zlib
-from datetime import date, datetime
 
-from . import auth, config, expand, fetch, llm, prune, storage
+from . import auth, config, download as download_cmd, expand, fetch, llm, prune
 from . import brain as brain_mod
 from . import larp as larp_mod
 from . import profile as profile_mod
 from . import curate as curate_mod
 from . import select as select_mod
-from .downloaders import instagram, tiktok, youtube
-from .downloaders import urls as urls_mod
-from .downloaders.budget import TotalBudget
 
 logger = logging.getLogger("yunoballizer")
-
-PLATFORMS = ("instagram", "youtube", "tiktok")
-
-
-def _non_negative_int(value: str) -> int:
-    number = int(value)
-    if number < 0:
-        raise argparse.ArgumentTypeError("must be 0 or greater")
-    return number
-
-
-def _date(value: str) -> date:
-    try:
-        return datetime.strptime(value, "%Y-%m-%d").date()
-    except ValueError:
-        raise argparse.ArgumentTypeError(f"invalid date {value!r}, expected YYYY-MM-DD")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,50 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    download_parser = sub.add_parser("download", help="No login required. Anonymous harvesting of accounts + urls.txt")
-    download_parser.add_argument(
-        "-l", "--limit", type=int, default=20,
-        help="Max posts to harvest per account (default: 20)",
-    )
-    download_parser.add_argument(
-        "-s", "--skip", type=_non_negative_int, default=0,
-        help="Skip the newest N posts per account before harvesting (default: 0)",
-    )
-    download_parser.add_argument(
-        "-p", "--platform", action="append", choices=PLATFORMS, dest="platforms", default=None,
-        help="Restrict harvesting to one platform; repeat to allow more than one "
-             "(default: all configured platforms). Also excludes urls.txt for that run, "
-             "since it isn't tied to a single platform",
-    )
-    download_parser.add_argument(
-        "--since", type=_date, default=None,
-        help="Only harvest posts published on or after this date (YYYY-MM-DD)",
-    )
-    download_parser.add_argument(
-        "--until", type=_date, default=None,
-        help="Only harvest posts published on or before this date (YYYY-MM-DD)",
-    )
-    download_parser.add_argument(
-        "-t", "--type", choices=["photo", "video"], default=None, dest="media_type",
-        help="Only harvest photos or videos. YouTube Shorts and TikTok posts are "
-             "always video, so --type photo skips those platforms entirely",
-    )
-    download_parser.add_argument(
-        "--total-limit", type=_non_negative_int, default=None,
-        help="Cap the total number of posts requested across every account and "
-             "platform combined in this run, on top of the per-account --limit "
-             "(default: unlimited)",
-    )
-    download_parser.add_argument(
-        "--delay", type=_non_negative_int, default=None,
-        help="Seconds to wait between accounts, overriding each platform's own "
-             "default (Instagram: 20s, TikTok: 15s, YouTube: 0s)",
-    )
-    download_parser.add_argument(
-        "target", nargs="?", default=None,
-        help="Harvest a single target across instagram/youtube/tiktok instead of the configured lists. "
-             "Must start with '@' for an account, e.g. '@nasa' (hashtag support may come later)",
-    )
+    download_cmd.add_subparser(sub)
 
     sub.add_parser(
         "fetch",
@@ -245,44 +182,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_download(
-    limit: int = 20,
-    skip: int = 0,
-    accounts: list[str] | None = None,
-    platforms: list[str] | None = None,
-    since: date | None = None,
-    until: date | None = None,
-    media_type: str | None = None,
-    total_limit: int | None = None,
-    delay: int | None = None,
-) -> None:
-    selected = set(platforms) if platforms else set(PLATFORMS)
-    budget = TotalBudget(total_limit) if total_limit is not None else None
-
-    extra: dict = {}
-    if since is not None:
-        extra["since"] = since
-    if until is not None:
-        extra["until"] = until
-    if media_type is not None:
-        extra["media_type"] = media_type
-    if budget is not None:
-        extra["budget"] = budget
-    if delay is not None:
-        extra["sleep_seconds"] = delay
-
-    if "instagram" in selected:
-        instagram.harvest(limit=limit, skip=skip, accounts=accounts, **extra)
-    if "youtube" in selected:
-        youtube.harvest(limit=limit, skip=skip, accounts=accounts, **extra)
-    if "tiktok" in selected:
-        tiktok.harvest(limit=limit, skip=skip, accounts=accounts, **extra)
-    if accounts is None and platforms is None:
-        urls_mod.harvest()
-    added = storage.refresh_review()
-    logger.info("New items added to review/: %d", added)
-
-
 def _run_expand() -> None:
     added_caption = expand.scan_caption_mentions()
     logger.info("New Instagram accounts added from caption mentions: %d", added_caption)
@@ -369,24 +268,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "expand":
         _run_expand()
     elif args.command == "download":
-        accounts = None
-        if args.target:
-            if not args.target.startswith("@"):
-                raise SystemExit(f"Invalid target '{args.target}': accounts must start with '@' (e.g. '@nasa')")
-            accounts = [args.target[1:]]
-        if args.since is not None and args.until is not None and args.since > args.until:
-            raise SystemExit(f"--since ({args.since}) is after --until ({args.until})")
-        _run_download(
-            limit=args.limit,
-            skip=args.skip,
-            accounts=accounts,
-            platforms=args.platforms,
-            since=args.since,
-            until=args.until,
-            media_type=args.media_type,
-            total_limit=args.total_limit,
-            delay=args.delay,
-        )
+        download_cmd.run(args)
     elif args.command == "profile":
         profile_mod.build()
     elif args.command == "curate":
@@ -417,7 +299,7 @@ def main(argv: list[str] | None = None) -> None:
             brain_mod.remove_profile(args.name)
             print(f"Removed brain profile {args.name!r}.")
     elif args.command == "all":
-        _run_download()
+        download_cmd._run_download()
         if (config.DERIVED_DIR / profile_mod.PROFILE_FILENAME).exists():
             curate_mod.run()
 

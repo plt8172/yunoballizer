@@ -79,6 +79,7 @@ yuno fetch                # Uses the active saved session. Adds saved-post autho
 
 yuno download            # No login required. Crawls accounts.txt + urls.txt (Instagram/YouTube/TikTok)
 yuno download @nasa      # Harvest a single account across all three platforms instead of the configured lists
+yuno download https://www.instagram.com/p/ABC123/   # Download a single post/video URL, same as adding it to urls.txt
 yuno download -l 5       # Cap harvest at 5 posts per account (default: 20)
 yuno download -s 5 -l 10 # Skip the newest 5 posts, then harvest the next 10 per account
 

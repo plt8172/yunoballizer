@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from yunoballizer import cli, storage
+from yunoballizer import download as download_cmd
 from yunoballizer.downloaders import instagram, tiktok, urls, youtube, ytdlp_helper
 from yunoballizer.downloaders.budget import TotalBudget
 
@@ -107,12 +108,12 @@ class CliParserTests(unittest.TestCase):
 
     def test_run_download_forwards_skip_to_account_downloaders(self) -> None:
         with (
-            patch.object(cli.instagram, "harvest") as instagram_harvest,
-            patch.object(cli.youtube, "harvest") as youtube_harvest,
-            patch.object(cli.tiktok, "harvest") as tiktok_harvest,
-            patch.object(cli.storage, "refresh_review", return_value=0),
+            patch.object(download_cmd.instagram, "harvest") as instagram_harvest,
+            patch.object(download_cmd.youtube, "harvest") as youtube_harvest,
+            patch.object(download_cmd.tiktok, "harvest") as tiktok_harvest,
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
         ):
-            cli._run_download(limit=10, skip=5, accounts=["nasa"])
+            download_cmd._run_download(limit=10, skip=5, accounts=["nasa"])
 
         for harvest in (instagram_harvest, youtube_harvest, tiktok_harvest):
             harvest.assert_called_once_with(limit=10, skip=5, accounts=["nasa"])
@@ -145,13 +146,13 @@ class CliParserTests(unittest.TestCase):
 
     def test_run_download_restricts_to_selected_platforms(self) -> None:
         with (
-            patch.object(cli.instagram, "harvest") as instagram_harvest,
-            patch.object(cli.youtube, "harvest") as youtube_harvest,
-            patch.object(cli.tiktok, "harvest") as tiktok_harvest,
-            patch.object(cli.urls_mod, "harvest") as urls_harvest,
-            patch.object(cli.storage, "refresh_review", return_value=0),
+            patch.object(download_cmd.instagram, "harvest") as instagram_harvest,
+            patch.object(download_cmd.youtube, "harvest") as youtube_harvest,
+            patch.object(download_cmd.tiktok, "harvest") as tiktok_harvest,
+            patch.object(download_cmd.urls_mod, "harvest") as urls_harvest,
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
         ):
-            cli._run_download(platforms=["instagram"])
+            download_cmd._run_download(platforms=["instagram"])
 
         instagram_harvest.assert_called_once_with(limit=20, skip=0, accounts=None)
         youtube_harvest.assert_not_called()
@@ -163,13 +164,13 @@ class CliParserTests(unittest.TestCase):
         since = datetime.date(2026, 1, 1)
         until = datetime.date(2026, 6, 30)
         with (
-            patch.object(cli.instagram, "harvest") as instagram_harvest,
-            patch.object(cli.youtube, "harvest") as youtube_harvest,
-            patch.object(cli.tiktok, "harvest") as tiktok_harvest,
-            patch.object(cli.urls_mod, "harvest"),
-            patch.object(cli.storage, "refresh_review", return_value=0),
+            patch.object(download_cmd.instagram, "harvest") as instagram_harvest,
+            patch.object(download_cmd.youtube, "harvest") as youtube_harvest,
+            patch.object(download_cmd.tiktok, "harvest") as tiktok_harvest,
+            patch.object(download_cmd.urls_mod, "harvest"),
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
         ):
-            cli._run_download(since=since, until=until, media_type="video", delay=5)
+            download_cmd._run_download(since=since, until=until, media_type="video", delay=5)
 
         for harvest in (instagram_harvest, youtube_harvest, tiktok_harvest):
             harvest.assert_called_once_with(
@@ -179,13 +180,13 @@ class CliParserTests(unittest.TestCase):
 
     def test_run_download_shares_one_budget_across_platforms(self) -> None:
         with (
-            patch.object(cli.instagram, "harvest") as instagram_harvest,
-            patch.object(cli.youtube, "harvest") as youtube_harvest,
-            patch.object(cli.tiktok, "harvest") as tiktok_harvest,
-            patch.object(cli.urls_mod, "harvest"),
-            patch.object(cli.storage, "refresh_review", return_value=0),
+            patch.object(download_cmd.instagram, "harvest") as instagram_harvest,
+            patch.object(download_cmd.youtube, "harvest") as youtube_harvest,
+            patch.object(download_cmd.tiktok, "harvest") as tiktok_harvest,
+            patch.object(download_cmd.urls_mod, "harvest"),
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
         ):
-            cli._run_download(total_limit=30)
+            download_cmd._run_download(total_limit=30)
 
         budgets = {
             call.kwargs["budget"]
@@ -195,6 +196,58 @@ class CliParserTests(unittest.TestCase):
         }
         self.assertEqual(len(budgets), 1)
         self.assertIsInstance(budgets.pop(), TotalBudget)
+
+
+class DownloadTargetRoutingTests(unittest.TestCase):
+    def test_is_url_recognizes_http_and_https_only(self) -> None:
+        self.assertTrue(download_cmd._is_url("https://www.tiktok.com/@nasa/video/1"))
+        self.assertTrue(download_cmd._is_url("http://example.test/post"))
+        self.assertFalse(download_cmd._is_url("@nasa"))
+        self.assertFalse(download_cmd._is_url("nasa"))
+
+    def test_run_dispatches_a_url_target_to_run_target_url(self) -> None:
+        args = cli.build_parser().parse_args(["download", "https://www.tiktok.com/@nasa/video/1"])
+        with patch.object(download_cmd, "_run_target_url") as run_target_url:
+            download_cmd.run(args)
+
+        run_target_url.assert_called_once_with("https://www.tiktok.com/@nasa/video/1")
+
+    def test_run_dispatches_an_account_target_to_run_download(self) -> None:
+        args = cli.build_parser().parse_args(["download", "@nasa"])
+        with patch.object(download_cmd, "_run_download") as run_download:
+            download_cmd.run(args)
+
+        run_download.assert_called_once_with(
+            limit=20, skip=0, accounts=["nasa"], platforms=None,
+            since=None, until=None, media_type=None, total_limit=None, delay=None,
+        )
+
+    def test_run_rejects_target_that_is_neither_account_nor_url(self) -> None:
+        args = cli.build_parser().parse_args(["download", "nasa"])
+        with self.assertRaises(SystemExit):
+            download_cmd.run(args)
+
+    def test_run_target_url_routes_instagram_url_through_instaloader(self) -> None:
+        with (
+            patch.object(download_cmd.instagram, "harvest_urls") as harvest_urls,
+            patch.object(download_cmd.urls_mod, "download_urls") as download_urls,
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
+        ):
+            download_cmd._run_target_url("https://www.instagram.com/p/ABC123/")
+
+        harvest_urls.assert_called_once_with(["https://www.instagram.com/p/ABC123/"])
+        download_urls.assert_not_called()
+
+    def test_run_target_url_routes_other_url_through_yt_dlp(self) -> None:
+        with (
+            patch.object(download_cmd.instagram, "harvest_urls") as harvest_urls,
+            patch.object(download_cmd.urls_mod, "download_urls") as download_urls,
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
+        ):
+            download_cmd._run_target_url("https://www.tiktok.com/@nasa/video/1")
+
+        download_urls.assert_called_once_with(["https://www.tiktok.com/@nasa/video/1"])
+        harvest_urls.assert_not_called()
 
 
 class TotalBudgetTests(unittest.TestCase):
@@ -683,6 +736,32 @@ class UrlsHarvestSplitTests(unittest.TestCase):
 
         harvest_urls.assert_not_called()
         download.assert_called_once()
+
+    def test_download_urls_is_a_noop_for_an_empty_list(self) -> None:
+        with (
+            patch.object(urls, "download") as download,
+            patch.object(urls.storage, "organize_ytdlp_tree") as organize,
+        ):
+            urls.download_urls([])
+
+        download.assert_not_called()
+        organize.assert_not_called()
+
+    def test_download_urls_shares_the_urls_txt_destination_and_archive(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(urls.config, "SOURCES_DIR", Path(tmpdir) / "sources"),
+            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(urls, "download") as download,
+            patch.object(urls.storage, "organize_ytdlp_tree") as organize,
+        ):
+            urls.download_urls(["https://www.tiktok.com/@nasa/video/1"])
+
+        download.assert_called_once()
+        self.assertEqual(download.call_args.args[0], ["https://www.tiktok.com/@nasa/video/1"])
+        self.assertEqual(download.call_args.args[2], Path(tmpdir) / "archives" / "other.txt")
+        self.assertEqual(download.call_args.kwargs["on_item_done"], urls.storage.refresh_new_ytdlp_post)
+        organize.assert_called_once_with(Path(tmpdir) / "sources" / "other")
 
 
 if __name__ == "__main__":

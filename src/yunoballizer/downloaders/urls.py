@@ -10,6 +10,31 @@ from .ytdlp_helper import download
 logger = logging.getLogger("yunoballizer.urls")
 
 
+def download_urls(urls: list[str]) -> None:
+    """Download a batch of non-Instagram URLs via yt-dlp.
+
+    Shares urls.txt's destination dir, archive file (dedup), and per-item
+    review/ refresh -- also used directly for a single ad-hoc URL passed to
+    `yuno download <url>`.
+    """
+    if not urls:
+        return
+
+    out_dir = config.SOURCES_DIR / "other"
+    archive = config.ARCHIVE_DIR / "other.txt"
+    logger.info("Processing %d URL(s)...", len(urls))
+    download(
+        urls,
+        str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "video.%(ext)s"),
+        archive,
+        metadata_template=str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "metadata.%(ext)s"),
+        caption_template=str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "caption.%(ext)s"),
+        on_item_done=storage.refresh_new_ytdlp_post,
+    )
+
+    storage.organize_ytdlp_tree(out_dir)
+
+
 def harvest() -> None:
     urls_file = config.CONFIG_DIR / "urls.txt"
     all_urls = config.read_lines(urls_file)
@@ -29,19 +54,4 @@ def harvest() -> None:
         logger.info("Processing %d Instagram URL(s)...", len(instagram_urls))
         instagram.harvest_urls(instagram_urls)
 
-    if not other_urls:
-        return
-
-    out_dir = config.SOURCES_DIR / "other"
-    archive = config.ARCHIVE_DIR / "other.txt"
-    logger.info("Processing %d URL(s)...", len(other_urls))
-    download(
-        other_urls,
-        str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "video.%(ext)s"),
-        archive,
-        metadata_template=str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "metadata.%(ext)s"),
-        caption_template=str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "caption.%(ext)s"),
-        on_item_done=storage.refresh_new_ytdlp_post,
-    )
-
-    storage.organize_ytdlp_tree(out_dir)
+    download_urls(other_urls)

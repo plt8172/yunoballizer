@@ -218,6 +218,24 @@ class CallTests(unittest.TestCase):
             with self.assertRaises(llm.LlmError):
                 llm.call("prompt", api_key="key", model="m", api_base=llm.DEFAULT_API_BASE, timeout=5)
 
+    def test_null_content_with_length_finish_reason_raises_actionable_error(self) -> None:
+        mock_resp = _mock_response(
+            {"choices": [{"message": {"content": None}, "finish_reason": "length"}]}
+        )
+        with patch.object(llm.urllib.request, "urlopen", return_value=mock_resp):
+            with self.assertRaises(llm.LlmError) as ctx:
+                llm.call("prompt", api_key="key", model="m", api_base=llm.DEFAULT_API_BASE, timeout=5)
+        self.assertIn("token budget", str(ctx.exception))
+
+    def test_null_content_without_length_finish_reason_raises_generic_error(self) -> None:
+        mock_resp = _mock_response(
+            {"choices": [{"message": {"content": None}, "finish_reason": "stop"}]}
+        )
+        with patch.object(llm.urllib.request, "urlopen", return_value=mock_resp):
+            with self.assertRaises(llm.LlmError) as ctx:
+                llm.call("prompt", api_key="key", model="m", api_base=llm.DEFAULT_API_BASE, timeout=5)
+        self.assertIn("missing the expected completion", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

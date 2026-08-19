@@ -110,10 +110,19 @@ def call(
     except json.JSONDecodeError as exc:
         raise LlmError(f"Got an unparseable response: {exc}") from exc
 
-    try:
-        text = body["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LlmError(f"Response was missing the expected completion: {exc}") from exc
+    choice = body.get("choices", [{}])[0] if body.get("choices") else {}
+    message = choice.get("message") or {}
+    text = message.get("content")
+    if text is None:
+        if choice.get("finish_reason") == "length":
+            raise LlmError(
+                f"Model {resolved_model!r} used its whole token budget without "
+                "producing a visible response (common with reasoning models "
+                "running out of room before they finish thinking). Try a "
+                "smaller/non-reasoning model."
+            )
+        raise LlmError(f"Response was missing the expected completion: {body!r}")
+    text = text.strip()
     if not text:
         raise LlmError(f"Got an empty response from model {resolved_model!r}. Try again.")
     return text

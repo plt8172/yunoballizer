@@ -77,7 +77,9 @@ def harvest(
     until: date | None = None,
     media_type: str | None = None,
     budget: TotalBudget | None = None,
+    progress: storage.ReviewProgress | None = None,
 ) -> None:
+    progress = progress if progress is not None else storage.ReviewProgress()
     if accounts is None:
         accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
         accounts = config.read_lines(accounts_file)
@@ -149,11 +151,11 @@ def harvest(
             # done, rather than waiting for every account across every
             # platform to finish before anything is browsable.
             storage.organize_instagram_account(account_dir)
-            storage.refresh_review()
+            progress.refresh()
         time.sleep(sleep_seconds)
 
 
-def harvest_urls(urls: list[str]) -> None:
+def harvest_urls(urls: list[str], progress: storage.ReviewProgress | None = None) -> None:
     """Download individual Instagram post URLs (from urls.txt) directly via Instaloader.
 
     Routed here instead of through yt-dlp: yt-dlp's Instagram extractor has
@@ -163,6 +165,7 @@ def harvest_urls(urls: list[str]) -> None:
     account harvesting -- has neither problem, since it talks to Instagram's
     own post-info endpoints instead of scraping/guessing a media URL.
     """
+    progress = progress if progress is not None else storage.ReviewProgress()
     out_dir = config.SOURCES_DIR / "instagram"
     out_dir.mkdir(parents=True, exist_ok=True)
     loader = _new_loader(out_dir)
@@ -196,4 +199,4 @@ def harvest_urls(urls: list[str]) -> None:
             logger.error("Failed to download %s: %s", url, e)
         finally:
             storage.organize_instagram_account(account_dir)
-            storage.refresh_review()
+            progress.refresh()

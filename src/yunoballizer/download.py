@@ -106,8 +106,14 @@ def _run_download(
 ) -> None:
     selected = set(platforms) if platforms else set(PLATFORMS)
     budget = TotalBudget(total_limit) if total_limit is not None else None
+    # Each harvest() below refreshes review/ incrementally as it goes (per
+    # account, per post) rather than waiting for the whole run to finish --
+    # so a single refresh_review() call here at the end would only ever see
+    # 0 left to add. Share one ReviewProgress across every platform instead
+    # and read its running total.
+    progress = storage.ReviewProgress()
 
-    extra: dict = {}
+    extra: dict = {"progress": progress}
     if since is not None:
         extra["since"] = since
     if until is not None:
@@ -126,9 +132,8 @@ def _run_download(
     if "tiktok" in selected:
         tiktok.harvest(limit=limit, skip=skip, accounts=accounts, **extra)
     if accounts is None and platforms is None:
-        urls_mod.harvest()
-    added = storage.refresh_review()
-    logger.info("New items added to review/: %d", added)
+        urls_mod.harvest(progress=progress)
+    logger.info("New items added to review/: %d", progress.total)
 
 
 def _run_target_url(url: str) -> None:
@@ -138,12 +143,12 @@ def _run_target_url(url: str) -> None:
     (instagram.harvest_urls), everything else through yt-dlp
     (urls_mod.download_urls) -- see those functions for why.
     """
+    progress = storage.ReviewProgress()
     if instagram.is_instagram_url(url):
-        instagram.harvest_urls([url])
+        instagram.harvest_urls([url], progress=progress)
     else:
-        urls_mod.download_urls([url])
-    added = storage.refresh_review()
-    logger.info("New items added to review/: %d", added)
+        urls_mod.download_urls([url], progress=progress)
+    logger.info("New items added to review/: %d", progress.total)
 
 
 def run(args: argparse.Namespace) -> None:

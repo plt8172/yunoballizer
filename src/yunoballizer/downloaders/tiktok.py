@@ -1,6 +1,7 @@
 """Anonymous TikTok account harvesting (hashtag/trending discovery not supported)."""
 from __future__ import annotations
 
+import functools
 import logging
 import time
 from datetime import date
@@ -21,10 +22,12 @@ def harvest(
     until: date | None = None,
     media_type: str | None = None,
     budget: TotalBudget | None = None,
+    progress: storage.ReviewProgress | None = None,
 ) -> None:
     if media_type == "photo":
         logger.info("TikTok posts are always video; skipping for --type photo.")
         return
+    progress = progress if progress is not None else storage.ReviewProgress()
 
     if accounts is None:
         accounts_file = config.CONFIG_DIR / "tiktok" / "accounts.txt"
@@ -59,7 +62,7 @@ def harvest(
             {"playliststart": skip + 1, "playlistend": skip + account_limit, **date_opts},
             metadata_template=str(out_dir / account / "%(id)s" / "metadata.%(ext)s"),
             caption_template=str(out_dir / account / "%(id)s" / "caption.%(ext)s"),
-            on_item_done=storage.refresh_new_ytdlp_post,
+            on_item_done=functools.partial(storage.refresh_new_ytdlp_post, progress=progress),
         )
         time.sleep(sleep_seconds)
 

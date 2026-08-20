@@ -233,5 +233,41 @@ class ReviewLinkTests(unittest.TestCase):
                 self.assertEqual(len(list(review_dir.iterdir())), 0)
 
 
+class ReviewProgressTests(unittest.TestCase):
+    def test_accumulates_across_many_refresh_calls(self) -> None:
+        # Regression test: a long download run refreshes review/ many times
+        # as it goes (once per account, once per post) so already-finished
+        # items stay browsable even if the run is interrupted -- but that
+        # means refresh_review() itself only ever reports what *that* call
+        # added, so a naive single trailing call for a final summary always
+        # reports 0. ReviewProgress must sum every call instead.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir) / "sources"
+            review_dir = Path(tmpdir) / "review"
+            _write(sources_dir / "youtube" / "creator" / "vid1" / "video.mp4")
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "REVIEW_DIR", review_dir),
+            ):
+                progress = storage.ReviewProgress()
+
+                # First item lands (e.g. one account/post finishing).
+                self.assertEqual(progress.refresh(), 1)
+                self.assertEqual(progress.total, 1)
+
+                # Second item lands later in the same run.
+                _write(sources_dir / "instagram" / "nasa" / "post1" / "image.jpg")
+                self.assertEqual(progress.refresh(), 1)
+                self.assertEqual(progress.total, 2)
+
+                # A trailing refresh with nothing new to add doesn't lose the total.
+                self.assertEqual(progress.refresh(), 0)
+                self.assertEqual(progress.total, 2)
+
+    def test_fresh_instance_starts_at_zero(self) -> None:
+        self.assertEqual(storage.ReviewProgress().total, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

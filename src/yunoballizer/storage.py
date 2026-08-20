@@ -179,15 +179,17 @@ def organize_ytdlp_tree(root: Path) -> None:
             organize_ytdlp_post_dir(directory)
 
 
-def refresh_new_ytdlp_post(post_dir: Path) -> None:
+def refresh_new_ytdlp_post(post_dir: Path, progress: ReviewProgress | None = None) -> None:
     """Organize one freshly-downloaded yt-dlp post dir and add it to review/ right away.
 
     Used as a yt-dlp progress-hook callback so a post shows up in review/ as
     soon as it finishes downloading, instead of only after the whole
-    account/playlist (or an interrupted download run) completes.
+    account/playlist (or an interrupted download run) completes. Pass a
+    shared ReviewProgress (via functools.partial) so a caller doing many of
+    these across a run can still report a true total -- see ReviewProgress.
     """
     organize_ytdlp_post_dir(post_dir)
-    refresh_review()
+    (progress if progress is not None else ReviewProgress()).refresh()
 
 
 def find_caption(media_path: Path) -> str:
@@ -242,7 +244,14 @@ def _prune_dangling_review_links() -> None:
 
 
 def refresh_review() -> int:
-    """Add any un-indexed sources/ media to the flat review/ symlink view."""
+    """Add any un-indexed sources/ media to the flat review/ symlink view.
+
+    Returns how many links this call itself added -- not a running total, so
+    calling it again right after (or after other code already refreshed
+    incrementally) legitimately returns 0 once nothing new is left to index.
+    A caller that refreshes many times over one run and wants the true total
+    across all of them should share one ReviewProgress instead.
+    """
     config.REVIEW_DIR.mkdir(parents=True, exist_ok=True)
     _prune_dangling_review_links()
 
@@ -266,3 +275,24 @@ def refresh_review() -> int:
         link_path.symlink_to(target)
         added += 1
     return added
+
+
+class ReviewProgress:
+    """Accumulates review/ additions across many incremental refresh() calls in one download run.
+
+    A long `download` run refreshes review/ many times as it goes -- once
+    per Instagram account, once per yt-dlp post -- so posts already
+    downloaded are browsable even if the run is interrupted later. But
+    refresh_review() only reports how many links *that call* added, so a
+    single trailing call for a final "N added" summary always reports 0 once
+    the run has been refreshing incrementally throughout. Share one instance
+    across a run instead and read .total at the end.
+    """
+
+    def __init__(self) -> None:
+        self.total = 0
+
+    def refresh(self) -> int:
+        added = refresh_review()
+        self.total += added
+        return added

@@ -28,10 +28,20 @@ def list_accounts(platform: str | None = None) -> dict[str, list[str]]:
 
 
 def add(platform: str, username: str) -> bool:
-    """Add an account to monitor. Returns True if it was actually added."""
-    return config.append_line(accounts_file(platform), _normalize(username))
+    """Add an account to monitor. Returns True if it was actually added.
+
+    Matches case-insensitively against whatever's already in the file --
+    accounts.txt is meant to be hand-edited too, and a manually-typed
+    "MrBeast" shouldn't end up duplicated by a later `accounts add
+    youtube mrbeast`.
+    """
+    return config.append_line(accounts_file(platform), _normalize(username), case_insensitive=True)
 
 
 def remove(platform: str, username: str) -> bool:
-    """Stop monitoring an account. Returns True if it was actually removed."""
-    return config.remove_line(accounts_file(platform), _normalize(username))
+    """Stop monitoring an account. Returns True if it was actually removed.
+
+    Case-insensitive for the same reason as add(): a hand-typed "MrBeast"
+    must still be found by `accounts remove youtube mrbeast`.
+    """
+    return config.remove_line(accounts_file(platform), _normalize(username), case_insensitive=True)

@@ -266,6 +266,49 @@ class SyncTests(unittest.TestCase):
 
             self.assertEqual(accounts_file.read_text(encoding="utf-8"), "alpha\nnasa\n")
 
+    def test_sync_does_not_remove_accounts_when_resolution_failed(self) -> None:
+        # "nasa" resolves fine and should still get confirmed/kept; "alpha"
+        # is a *different*, still-genuinely-saved account whose owner_id
+        # happened to fail to resolve this run (rate limit, etc). Since
+        # discovery is incomplete, --sync must not treat alpha's absence
+        # from `authors` as proof it was unsaved and delete it.
+        posts = [_FakePost(owner_id=1, username="nasa"), _FakePost(owner_id=2, raises=True)]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            accounts_file = config_dir / "instagram" / "accounts.txt"
+            accounts_file.parent.mkdir(parents=True)
+            accounts_file.write_text("alpha\nnasa\n", encoding="utf-8")
+
+            with (
+                patch.object(fetch.config, "CONFIG_DIR", config_dir),
+                patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
+                patch.object(fetch, "_saved_posts", return_value=posts),
+            ):
+                added = fetch.run(sync=True)
+
+            self.assertEqual(added, 0)
+            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "alpha\nnasa\n")
+
+    def test_sync_still_adds_successfully_resolved_accounts_despite_other_failures(self) -> None:
+        posts = [_FakePost(owner_id=1, username="natgeo"), _FakePost(owner_id=2, raises=True)]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            accounts_file = config_dir / "instagram" / "accounts.txt"
+            accounts_file.parent.mkdir(parents=True)
+            accounts_file.write_text("alpha\n", encoding="utf-8")
+
+            with (
+                patch.object(fetch.config, "CONFIG_DIR", config_dir),
+                patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
+                patch.object(fetch, "_saved_posts", return_value=posts),
+            ):
+                added = fetch.run(sync=True)
+
+            self.assertEqual(added, 1)
+            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "alpha\nnatgeo\n")
+
 
 if __name__ == "__main__":
     unittest.main()

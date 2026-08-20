@@ -71,7 +71,12 @@ def _resolve_username(post: Any) -> str | None:
         return None
 
 
-def _saved_authors(loader: Any, limit: int | None) -> set[str]:
+def _saved_authors(loader: Any, limit: int | None) -> tuple[set[str], bool]:
+    """Return (authors, had_failures). had_failures means at least one
+    owner couldn't be resolved this run -- the caller needs that to know
+    the result isn't a trustworthy full picture (see run()'s --sync
+    handling: a resolution failure must never be treated the same as
+    "no longer saved")."""
     posts = _saved_posts(loader)
     if limit is not None:
         posts = itertools.islice(posts, limit)
@@ -81,11 +86,14 @@ def _saved_authors(loader: Any, limit: int | None) -> set[str]:
         representative_by_owner.setdefault(post.owner_id, post)
 
     authors = set()
+    had_failures = False
     for post in representative_by_owner.values():
         username = _resolve_username(post)
         if username and username.strip():
             authors.add(username.strip().lower())
-    return authors
+        else:
+            had_failures = True
+    return authors, had_failures
 
 
 def _following_authors(loader: Any, limit: int | None) -> set[str]:
@@ -130,7 +138,12 @@ def run(
     single source the two end up equivalent, but only total_limit stays
     correct once more than one source is selected. With sync=True,
     accounts.txt is made to match exactly what was found this run -- any
-    account not in that result gets removed, not just new ones added.
+    account not in that result gets removed, not just new ones added --
+    unless some account's owner couldn't be resolved this run (a transient
+    rate limit or network error), in which case removals are skipped
+    entirely, since a resolution failure and "no longer saved" would
+    otherwise be indistinguishable and --sync could delete accounts that
+    are still genuinely saved.
     """
     sources = sources or ["saved"]
     _validate_sources(sources)
@@ -139,8 +152,10 @@ def run(
     accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
 
     authors: set[str] = set()
+    had_failures = False
     if "saved" in sources:
-        authors |= _saved_authors(loader, limit)
+        saved_authors, had_failures = _saved_authors(loader, limit)
+        authors |= saved_authors
     if "following" in sources:
         authors |= _following_authors(loader, limit)
 
@@ -148,6 +163,16 @@ def run(
         authors = set(sorted(authors)[:total_limit])
 
     if sync:
+        if had_failures:
+            logger.warning(
+                "Some accounts could not be resolved this run -- skipping removals for "
+                "--sync (a resolution failure can't be told apart from an account that's "
+                "no longer in the selected source(s)). Only additions were applied."
+            )
+            added = sum(config.append_line(accounts_file, name) for name in sorted(authors))
+            logger.info("Accounts found: %d, added: %d, removed: 0 (skipped)", len(authors), added)
+            return added
+
         stale = sorted(set(config.read_lines(accounts_file)) - authors)
         for name in stale:
             config.remove_line(accounts_file, name)

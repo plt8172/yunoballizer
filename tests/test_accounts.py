@@ -49,6 +49,28 @@ class AccountsTests(unittest.TestCase):
                 self.assertEqual(result["tiktok"], ["khaby.lame"])
                 self.assertEqual(result["youtube"], [])
 
+    def test_add_does_not_duplicate_a_hand_typed_mixed_case_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            with patch.object(accounts.config, "CONFIG_DIR", config_dir):
+                path = accounts.accounts_file("youtube")
+                path.parent.mkdir(parents=True)
+                path.write_text("MrBeast\n", encoding="utf-8")
+
+                self.assertFalse(accounts.add("youtube", "mrbeast"))
+                self.assertEqual(path.read_text(encoding="utf-8"), "MrBeast\n")
+
+    def test_remove_finds_a_hand_typed_mixed_case_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            with patch.object(accounts.config, "CONFIG_DIR", config_dir):
+                path = accounts.accounts_file("youtube")
+                path.parent.mkdir(parents=True)
+                path.write_text("MrBeast\nveritasium\n", encoding="utf-8")
+
+                self.assertTrue(accounts.remove("youtube", "mrbeast"))
+                self.assertEqual(path.read_text(encoding="utf-8"), "veritasium\n")
+
     def test_add_rejects_empty_username(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)

@@ -159,6 +159,46 @@ class FollowingSourceTests(unittest.TestCase):
             self.assertEqual(accounts_file.read_text(encoding="utf-8"), "nasa\nnatgeo\n")
 
 
+class TotalLimitTests(unittest.TestCase):
+    def test_caps_the_combined_result_across_sources(self) -> None:
+        # --limit alone would let each source contribute up to its own cap
+        # (here, both saved and following would each get through); only
+        # total_limit caps the merged result to a true grand total.
+        posts = [_FakePost(owner_id=1, username="nasa")]
+        followees = [SimpleNamespace(username="natgeo")]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+
+            with (
+                patch.object(fetch.config, "CONFIG_DIR", config_dir),
+                patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
+                patch.object(fetch, "_saved_posts", return_value=posts),
+                patch.object(fetch, "_followees", return_value=followees),
+            ):
+                added = fetch.run(sources=["saved", "following"], total_limit=1)
+
+            accounts_file = config_dir / "instagram" / "accounts.txt"
+            self.assertEqual(added, 1)
+            # Deterministic (alphabetical), not source-order-dependent.
+            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "nasa\n")
+
+    def test_agrees_with_limit_for_a_single_source(self) -> None:
+        posts = [_FakePost(owner_id=i, username=f"user{i}") for i in range(5)]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+
+            with (
+                patch.object(fetch.config, "CONFIG_DIR", config_dir),
+                patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
+                patch.object(fetch, "_saved_posts", return_value=posts),
+            ):
+                added = fetch.run(total_limit=2)
+
+            self.assertEqual(added, 2)
+
+
 class SourceValidationTests(unittest.TestCase):
     def test_unsupported_source_raises_with_a_reason(self) -> None:
         with self.assertRaises(SystemExit) as ctx:

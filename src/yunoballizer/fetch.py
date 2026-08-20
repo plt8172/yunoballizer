@@ -114,14 +114,23 @@ def _validate_sources(sources: list[str]) -> None:
         )
 
 
-def run(limit: int | None = None, sync: bool = False, sources: list[str] | None = None) -> int:
+def run(
+    limit: int | None = None,
+    sync: bool = False,
+    sources: list[str] | None = None,
+    total_limit: int | None = None,
+) -> int:
     """Add accounts from the selected source(s) to accounts.txt.
 
     sources defaults to ["saved"]; pass e.g. ["saved", "following"] to pull
     from more than one. limit caps how many items are read *per source*
-    (default: no limit). With sync=True, accounts.txt is made to match
-    exactly what was found this run -- any account not in that result gets
-    removed, not just new ones added.
+    (default: no limit) -- with two sources selected, the combined result
+    can still be up to 2x limit. total_limit instead caps the *combined*
+    result across every selected source, after they're merged -- with a
+    single source the two end up equivalent, but only total_limit stays
+    correct once more than one source is selected. With sync=True,
+    accounts.txt is made to match exactly what was found this run -- any
+    account not in that result gets removed, not just new ones added.
     """
     sources = sources or ["saved"]
     _validate_sources(sources)
@@ -134,6 +143,9 @@ def run(limit: int | None = None, sync: bool = False, sources: list[str] | None 
         authors |= _saved_authors(loader, limit)
     if "following" in sources:
         authors |= _following_authors(loader, limit)
+
+    if total_limit is not None:
+        authors = set(sorted(authors)[:total_limit])
 
     if sync:
         stale = sorted(set(config.read_lines(accounts_file)) - authors)

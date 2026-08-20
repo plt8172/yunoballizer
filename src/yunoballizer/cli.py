@@ -57,7 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fetch_parser.add_argument(
         "-l", "--limit", type=int, default=None,
-        help="Max items to read per selected source (default: no limit)",
+        help="Max items to read per selected source (default: no limit). With more than one "
+             "--source, the combined result can be up to N times this -- see --total-limit",
+    )
+    fetch_parser.add_argument(
+        "--total-limit", type=int, default=None,
+        help="Max accounts across all selected sources combined, applied after merging them "
+             "(default: no limit). Not an alias for --limit: with a single source they agree, "
+             "but only --total-limit stays a true total once more than one --source is given",
     )
     fetch_parser.add_argument(
         "--sync", action="store_true",
@@ -326,7 +333,7 @@ def main(argv: list[str] | None = None) -> None:
     config.load_env_file()
 
     if args.command == "fetch":
-        fetch.run(limit=args.limit, sync=args.sync, sources=args.source)
+        fetch.run(limit=args.limit, sync=args.sync, sources=args.source, total_limit=args.total_limit)
     elif args.command == "auth":
         if args.auth_command == "login":
             auth.login(browser=args.browser, assume_yes=args.yes)

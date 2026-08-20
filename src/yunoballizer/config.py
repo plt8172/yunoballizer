@@ -138,10 +138,20 @@ def read_lines(path: Path) -> list[str]:
     return lines
 
 
-def append_line(path: Path, value: str) -> bool:
-    """Append a value to a config file if not already present. Returns True if actually added."""
+def append_line(path: Path, value: str, *, case_insensitive: bool = False) -> bool:
+    """Append a value to a config file if not already present. Returns True if actually added.
+
+    case_insensitive controls only the "already present" check -- a
+    hand-edited file with a differently-cased existing entry (accounts.txt
+    is user-editable, and Instagram/TikTok/YouTube usernames aren't
+    case-sensitive) won't get a case-variant duplicate appended next to it.
+    Off by default since not every caller's values are case-insensitive
+    (URLs in urls.txt, for one).
+    """
     existing = set(read_lines(path))
-    if value in existing:
+    check = {v.lower() for v in existing} if case_insensitive else existing
+    needle = value.lower() if case_insensitive else value
+    if needle in check:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
     needs_leading_newline = False
@@ -152,4 +162,25 @@ def append_line(path: Path, value: str) -> bool:
         if needs_leading_newline:
             f.write("\n")
         f.write(value + "\n")
+    return True
+
+
+def remove_line(path: Path, value: str, *, case_insensitive: bool = False) -> bool:
+    """Remove a value from a config file if present. Returns True if actually removed.
+
+    Comments and blank lines are left untouched -- only lines that match
+    value (after stripping) are dropped. See append_line for why
+    case_insensitive exists and defaults off.
+    """
+    if not path.exists():
+        return False
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if case_insensitive:
+        needle = value.lower()
+        kept = [line for line in lines if line.strip().lower() != needle]
+    else:
+        kept = [line for line in lines if line.strip() != value]
+    if len(kept) == len(lines):
+        return False
+    path.write_text("".join(line + "\n" for line in kept), encoding="utf-8")
     return True

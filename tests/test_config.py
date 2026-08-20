@@ -156,5 +156,62 @@ class LoadEnvFileTests(unittest.TestCase):
                 config.load_env_file()  # must not raise
 
 
+class RemoveLineTests(unittest.TestCase):
+    def test_removes_matching_line_and_leaves_others_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "accounts.txt"
+            path.write_text("# comment\nnasa\nnatgeo\n", encoding="utf-8")
+
+            self.assertTrue(config.remove_line(path, "nasa"))
+            self.assertEqual(path.read_text(encoding="utf-8"), "# comment\nnatgeo\n")
+
+    def test_missing_value_is_a_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "accounts.txt"
+            path.write_text("nasa\n", encoding="utf-8")
+
+            self.assertFalse(config.remove_line(path, "natgeo"))
+            self.assertEqual(path.read_text(encoding="utf-8"), "nasa\n")
+
+    def test_missing_file_is_a_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "missing.txt"
+            self.assertFalse(config.remove_line(path, "nasa"))
+
+    def test_exact_match_is_case_sensitive_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "accounts.txt"
+            path.write_text("NASA\n", encoding="utf-8")
+
+            self.assertFalse(config.remove_line(path, "nasa"))
+            self.assertEqual(path.read_text(encoding="utf-8"), "NASA\n")
+
+    def test_case_insensitive_removes_a_differently_cased_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "accounts.txt"
+            path.write_text("NASA\nnatgeo\n", encoding="utf-8")
+
+            self.assertTrue(config.remove_line(path, "nasa", case_insensitive=True))
+            self.assertEqual(path.read_text(encoding="utf-8"), "natgeo\n")
+
+
+class AppendLineCaseInsensitiveTests(unittest.TestCase):
+    def test_exact_match_is_case_sensitive_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "accounts.txt"
+            path.write_text("NASA\n", encoding="utf-8")
+
+            self.assertTrue(config.append_line(path, "nasa"))
+            self.assertEqual(path.read_text(encoding="utf-8"), "NASA\nnasa\n")
+
+    def test_case_insensitive_skips_a_differently_cased_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "accounts.txt"
+            path.write_text("NASA\n", encoding="utf-8")
+
+            self.assertFalse(config.append_line(path, "nasa", case_insensitive=True))
+            self.assertEqual(path.read_text(encoding="utf-8"), "NASA\n")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,8 @@ import logging
 import sys
 import zlib
 
-from . import auth, config, download as download_cmd, expand, fetch, llm, prune
+from . import accounts as accounts_mod
+from . import auth, config, download as download_cmd, expand, fetch, llm, prune, storage
 from . import brain as brain_mod
 from . import larp as larp_mod
 from . import profile as profile_mod
@@ -28,9 +29,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     download_cmd.add_subparser(sub)
 
-    sub.add_parser(
+    fetch_parser = sub.add_parser(
         "fetch",
-        help="Requires an active session (see `auth login`). Adds saved-post authors to Instagram accounts.txt",
+        help="Requires an active session (see `auth login`). Adds accounts from Instagram to accounts.txt",
+    )
+    fetch_parser.add_argument(
+        "-l", "--limit", type=int, default=None,
+        help="Max items to read per selected source (default: no limit). With more than one "
+             "--source, the combined result can be up to N times this -- see --total-limit",
+    )
+    fetch_parser.add_argument(
+        "--total-limit", type=int, default=None,
+        help="Max accounts across all selected sources combined, applied after merging them "
+             "(default: no limit). Not an alias for --limit: with a single source they agree, "
+             "but only --total-limit stays a true total once more than one --source is given",
+    )
+    fetch_parser.add_argument(
+        "--sync", action="store_true",
+        help="Make accounts.txt match exactly what's found this run -- removes any account not "
+             "in the selected source(s), not just adds new ones",
+    )
+    fetch_parser.add_argument(
+        "--source", nargs="+", default=["saved"], metavar="SOURCE",
+        help=f"Where to pull accounts from (default: saved). Multiple allowed, e.g. "
+             f"'--source saved following'. Supported: {', '.join(fetch.SOURCES)}. "
+             f"NOT available -- no Instagram API exposes them, official or not -- "
+             f"{', '.join(fetch._UNSUPPORTED_SOURCES)}",
     )
 
     auth_parser = sub.add_parser("auth", help="Manage saved Instagram login sessions used by fetch")
@@ -75,12 +99,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("expand", help="No login required. Expands Instagram accounts.txt from downloaded caption mentions")
+
+    accounts_parser = sub.add_parser("accounts", help="View or edit the per-platform accounts.txt lists")
+    accounts_sub = accounts_parser.add_subparsers(dest="accounts_command", required=True)
+
+    accounts_list_parser = accounts_sub.add_parser("list", help="List monitored accounts")
+    accounts_list_parser.add_argument(
+        "platform", nargs="?", choices=accounts_mod.PLATFORMS, default=None,
+        help="Limit to one platform (default: all)",
+    )
+
+    accounts_add_parser = accounts_sub.add_parser("add", help="Add an account to monitor")
+    accounts_add_parser.add_argument("platform", choices=accounts_mod.PLATFORMS)
+    accounts_add_parser.add_argument("username")
+
+    accounts_remove_parser = accounts_sub.add_parser("remove", help="Stop monitoring an account")
+    accounts_remove_parser.add_argument("platform", choices=accounts_mod.PLATFORMS)
+    accounts_remove_parser.add_argument("username")
     sub.add_parser("profile", help="Build/refresh the content profile from downloaded Instagram captions")
     sub.add_parser("curate", help="Curate new posts against the content profile")
 
     sub.add_parser(
         "select",
-        help="Browse review/ one item at a time (arrows to move, s to select/deselect, "
+        help="Browse review/ one item at a time (arrows to move, s/d to select/deselect, "
+             "ctrl+s/ctrl+d to add/remove the item's account, "
              "o to open in your OS's default viewer/player, Enter/q to finish)",
     )
     sub.add_parser("export", help="Copy/hardlink selected media into selected/")
@@ -255,7 +297,7 @@ def main(argv: list[str] | None = None) -> None:
     config.load_env_file()
 
     if args.command == "fetch":
-        fetch.run()
+        fetch.run(limit=args.limit, sync=args.sync, sources=args.source, total_limit=args.total_limit)
     elif args.command == "auth":
         if args.auth_command == "login":
             auth.login(browser=args.browser, assume_yes=args.yes)
@@ -267,6 +309,20 @@ def main(argv: list[str] | None = None) -> None:
             auth.logout(args.username)
     elif args.command == "expand":
         _run_expand()
+    elif args.command == "accounts":
+        if args.accounts_command == "list":
+            for platform, names in accounts_mod.list_accounts(args.platform).items():
+                print(f"{platform} ({len(names)}):")
+                for name in names:
+                    print(f"  {name}")
+        elif args.accounts_command == "add":
+            added = accounts_mod.add(args.platform, args.username)
+            username = args.username.strip().lstrip("@").lower()
+            print(f"{'Added' if added else 'Already present:'} @{username} ({args.platform})")
+        elif args.accounts_command == "remove":
+            username = args.username.strip().lstrip("@").lower()
+            removed = accounts_mod.remove(args.platform, args.username)
+            print(f"{'Removed' if removed else 'Not found:'} @{username} ({args.platform})")
     elif args.command == "download":
         download_cmd.run(args)
     elif args.command == "profile":

@@ -9,14 +9,32 @@ from unittest.mock import patch
 from yunoballizer import fetch
 
 
+class _FakePost:
+    """Stands in for instaloader's Post: owner_id is free, owner_username
+    is a request that's paid the first time it's read on a given instance
+    (tracked via access_count so tests can assert dedup actually happens)."""
+
+    def __init__(self, owner_id, username=None, raises=False):
+        self.owner_id = owner_id
+        self._username = username
+        self._raises = raises
+        self.access_count = 0
+
+    @property
+    def owner_username(self):
+        self.access_count += 1
+        if self._raises:
+            raise RuntimeError("blocked")
+        return self._username
+
+
 class SavedSourceTests(unittest.TestCase):
     def test_adds_unique_normalized_saved_post_authors(self) -> None:
         posts = [
-            SimpleNamespace(owner_id=1),
-            SimpleNamespace(owner_id=2),
-            SimpleNamespace(owner_id=3),
+            _FakePost(owner_id=1, username="Zeta"),
+            _FakePost(owner_id=2, username="alpha"),
+            _FakePost(owner_id=3, username="ALPHA"),
         ]
-        usernames = {1: "Zeta", 2: "alpha", 3: "ALPHA"}
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
@@ -28,10 +46,6 @@ class SavedSourceTests(unittest.TestCase):
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
                 patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
                 patch.object(fetch, "_saved_posts", return_value=posts),
-                patch(
-                    "instaloader.Profile.from_id",
-                    side_effect=lambda context, owner_id: SimpleNamespace(username=usernames[owner_id]),
-                ),
             ):
                 added = fetch.run()
 
@@ -40,8 +54,11 @@ class SavedSourceTests(unittest.TestCase):
 
     def test_resolves_each_unique_owner_id_only_once(self) -> None:
         # Saving several posts from the same account is the common case --
-        # resolving should cost one request per unique owner, not one per post.
-        posts = [SimpleNamespace(owner_id=1) for _ in range(5)]
+        # resolving should cost one request per unique owner, not one per
+        # post, and it should be the *first* post for that owner that pays
+        # it (later ones for the same owner must never be touched).
+        posts = [_FakePost(owner_id=1, username="alpha") for _ in range(4)]
+        posts.append(_FakePost(owner_id=1, raises=True))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
@@ -50,23 +67,15 @@ class SavedSourceTests(unittest.TestCase):
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
                 patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
                 patch.object(fetch, "_saved_posts", return_value=posts),
-                patch(
-                    "instaloader.Profile.from_id",
-                    return_value=SimpleNamespace(username="alpha"),
-                ) as from_id,
             ):
                 added = fetch.run()
 
             self.assertEqual(added, 1)
-            self.assertEqual(from_id.call_count, 1)
+            self.assertEqual(posts[0].access_count, 1)
+            self.assertEqual(posts[-1].access_count, 0)
 
     def test_skips_owners_that_fail_to_resolve(self) -> None:
-        posts = [SimpleNamespace(owner_id=1), SimpleNamespace(owner_id=2)]
-
-        def fake_from_id(context, owner_id):
-            if owner_id == 1:
-                raise Exception("blocked")
-            return SimpleNamespace(username="alpha")
+        posts = [_FakePost(owner_id=1, raises=True), _FakePost(owner_id=2, username="alpha")]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
@@ -75,14 +84,13 @@ class SavedSourceTests(unittest.TestCase):
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
                 patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
                 patch.object(fetch, "_saved_posts", return_value=posts),
-                patch("instaloader.Profile.from_id", side_effect=fake_from_id),
             ):
                 added = fetch.run()
 
             self.assertEqual(added, 1)
 
     def test_limit_caps_how_many_saved_posts_are_read(self) -> None:
-        posts = [SimpleNamespace(owner_id=i) for i in range(5)]
+        posts = [_FakePost(owner_id=i, username=f"user{i}") for i in range(5)]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
@@ -91,15 +99,11 @@ class SavedSourceTests(unittest.TestCase):
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
                 patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
                 patch.object(fetch, "_saved_posts", return_value=posts),
-                patch(
-                    "instaloader.Profile.from_id",
-                    side_effect=lambda context, owner_id: SimpleNamespace(username=f"user{owner_id}"),
-                ) as from_id,
             ):
                 added = fetch.run(limit=2)
 
             self.assertEqual(added, 2)
-            self.assertEqual(from_id.call_count, 2)
+            self.assertEqual(sum(p.access_count for p in posts), 2)
 
 
 class FollowingSourceTests(unittest.TestCase):
@@ -136,7 +140,7 @@ class FollowingSourceTests(unittest.TestCase):
             self.assertEqual(added, 2)
 
     def test_can_combine_saved_and_following(self) -> None:
-        posts = [SimpleNamespace(owner_id=1)]
+        posts = [_FakePost(owner_id=1, username="nasa")]
         followees = [SimpleNamespace(username="natgeo")]
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -147,7 +151,6 @@ class FollowingSourceTests(unittest.TestCase):
                 patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
                 patch.object(fetch, "_saved_posts", return_value=posts),
                 patch.object(fetch, "_followees", return_value=followees),
-                patch("instaloader.Profile.from_id", return_value=SimpleNamespace(username="nasa")),
             ):
                 added = fetch.run(sources=["saved", "following"])
 
@@ -170,7 +173,7 @@ class SourceValidationTests(unittest.TestCase):
 
 class SyncTests(unittest.TestCase):
     def test_sync_removes_accounts_no_longer_in_the_source(self) -> None:
-        posts = [SimpleNamespace(owner_id=1)]
+        posts = [_FakePost(owner_id=1, username="nasa")]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
@@ -182,7 +185,6 @@ class SyncTests(unittest.TestCase):
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
                 patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
                 patch.object(fetch, "_saved_posts", return_value=posts),
-                patch("instaloader.Profile.from_id", return_value=SimpleNamespace(username="nasa")),
             ):
                 added = fetch.run(sync=True)
 
@@ -207,7 +209,7 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(accounts_file.read_text(encoding="utf-8"), "")
 
     def test_without_sync_stale_accounts_are_left_alone(self) -> None:
-        posts = [SimpleNamespace(owner_id=1)]
+        posts = [_FakePost(owner_id=1, username="nasa")]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
@@ -219,7 +221,6 @@ class SyncTests(unittest.TestCase):
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
                 patch.object(fetch.auth, "get_loader", return_value=SimpleNamespace(context=object())),
                 patch.object(fetch, "_saved_posts", return_value=posts),
-                patch("instaloader.Profile.from_id", return_value=SimpleNamespace(username="nasa")),
             ):
                 fetch.run(sync=False)
 

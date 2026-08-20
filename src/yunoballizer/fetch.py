@@ -46,23 +46,28 @@ def _followees(loader: Any) -> Iterable[Any]:
     return instaloader.Profile.own_profile(loader.context).get_followees()
 
 
-def _resolve_username(loader: Any, owner_id: int) -> str | None:
-    """Resolve a saved post's owner id to a username.
+def _resolve_username(post: Any) -> str | None:
+    """Resolve one saved post's owner_username, tolerating failures.
 
-    The saved-posts listing gives each post's owner id but not their
-    username. Reading `post.owner_username` directly would make instaloader
-    fetch that post's *entire* metadata just to get it -- one extra request
-    per post. Profile.from_id() resolves an id with a single lighter
-    request and instaloader caches the result, so posts sharing an owner
-    (common, since saving several posts from the same account is normal)
-    only cost one request total instead of one per post.
+    post.owner_username triggers a request the first time it's read on a
+    given Post instance (the saved-posts listing doesn't include it up
+    front). _saved_authors() below only calls this once per unique owner
+    (not once per post) by picking a single representative post per owner
+    id first, so that cost is paid once per account, not once per save.
+
+    Resolving by numeric id via Profile.from_id() instead (its api/v1/
+    REST endpoint) was tried and dropped: that endpoint expects the
+    mobile-app request shape, and reliably failed against the
+    browser-cookie sessions auth.py produces, even though the exact same
+    account works fine through owner_username's GraphQL request. Staying
+    on the request shape the rest of this project already depends on is
+    worth more than the marginal saving from a lighter endpoint that
+    doesn't actually work here.
     """
-    import instaloader
-
     try:
-        return instaloader.Profile.from_id(loader.context, owner_id).username
+        return post.owner_username
     except Exception:
-        logger.warning("Could not resolve saved-post owner id %s, skipping", owner_id)
+        logger.warning("Could not resolve saved-post owner id %s, skipping", getattr(post, "owner_id", "?"))
         return None
 
 
@@ -70,11 +75,14 @@ def _saved_authors(loader: Any, limit: int | None) -> set[str]:
     posts = _saved_posts(loader)
     if limit is not None:
         posts = itertools.islice(posts, limit)
-    owner_ids = {post.owner_id for post in posts}
+
+    representative_by_owner: dict[int, Any] = {}
+    for post in posts:
+        representative_by_owner.setdefault(post.owner_id, post)
 
     authors = set()
-    for owner_id in owner_ids:
-        username = _resolve_username(loader, owner_id)
+    for post in representative_by_owner.values():
+        username = _resolve_username(post)
         if username and username.strip():
             authors.add(username.strip().lower())
     return authors

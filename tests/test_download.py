@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import ANY, Mock, patch
 
 from yunoballizer import cli, config, storage
-from yunoballizer import download as download_cmd
+from yunoballizer.commands import download as download_cmd
 from yunoballizer.downloaders import instagram, tiktok, urls, youtube, ytdlp_helper
 from yunoballizer.downloaders.budget import TotalBudget
 

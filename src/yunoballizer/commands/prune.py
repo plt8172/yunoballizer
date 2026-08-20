@@ -10,9 +10,9 @@ from __future__ import annotations
 import logging
 import shutil
 
-from . import config
+from .. import config
 
-logger = logging.getLogger("yunoballizer.uninstall")
+logger = logging.getLogger(__name__)
 
 REMOVABLE_DIRS = [
     config.CONFIG_DIR,

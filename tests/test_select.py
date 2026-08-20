@@ -9,8 +9,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yunoballizer import accounts as accounts_mod
-from yunoballizer import config, larp, select, termui
+from yunoballizer import config, termui
+from yunoballizer.commands import accounts as accounts_mod
+from yunoballizer.commands import larp, select
 
 
 class RecordSelectionTests(unittest.TestCase):

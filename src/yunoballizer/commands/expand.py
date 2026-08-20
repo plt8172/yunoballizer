@@ -9,9 +9,9 @@ import logging
 import re
 from collections import Counter
 
-from . import config
+from .. import config
 
-logger = logging.getLogger("yunoballizer.expand")
+logger = logging.getLogger(__name__)
 
 MENTION_RE = re.compile(r"@([A-Za-z0-9_.]{2,30})")
 

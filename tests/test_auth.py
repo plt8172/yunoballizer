@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from yunoballizer import auth
+from yunoballizer.commands import auth
 
 
 class ImportFromBrowserTests(unittest.TestCase):

@@ -30,9 +30,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from . import config
+from .. import config
 
-logger = logging.getLogger("yunoballizer.auth")
+logger = logging.getLogger(__name__)
 
 DEFAULT_BROWSER = "chrome"
 INTERACTIVE_LOGIN_TIMEOUT_SECONDS = 300

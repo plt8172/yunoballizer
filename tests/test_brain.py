@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yunoballizer import brain
+from yunoballizer.commands import brain
 
 
 class BrainProfileTests(unittest.TestCase):

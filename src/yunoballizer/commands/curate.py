@@ -7,11 +7,11 @@ import re
 from pathlib import Path
 from shutil import copy2
 
-from . import config, llm
+from .. import config, llm
+from ..storage import MEDIA_EXTS, find_caption, review_link_name
 from .profile import PROFILE_FILENAME
-from .storage import MEDIA_EXTS, find_caption, review_link_name
 
-logger = logging.getLogger("yunoballizer.curate")
+logger = logging.getLogger(__name__)
 
 LOW_THRESHOLD = 0.05
 HIGH_THRESHOLD = 0.25

@@ -7,13 +7,14 @@ import logging
 import sys
 import zlib
 
-from . import accounts as accounts_mod
-from . import auth, config, download as download_cmd, expand, fetch, llm, prune, storage
-from . import brain as brain_mod
-from . import larp as larp_mod
-from . import profile as profile_mod
-from . import curate as curate_mod
-from . import select as select_mod
+from . import config, llm, storage
+from .commands import accounts as accounts_mod
+from .commands import auth, download as download_cmd, expand, fetch, prune
+from .commands import brain as brain_mod
+from .commands import larp as larp_mod
+from .commands import profile as profile_mod
+from .commands import curate as curate_mod
+from .commands import select as select_mod
 
 logger = logging.getLogger("yunoballizer")
 

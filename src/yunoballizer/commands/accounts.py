@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import config
+from .. import config
 
 PLATFORMS = ("instagram", "tiktok", "youtube")
 

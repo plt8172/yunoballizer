@@ -14,7 +14,7 @@ import os
 import urllib.error
 import urllib.request
 
-from . import brain
+from .commands import brain
 
 DEFAULT_API_BASE = "https://api.groq.com/openai/v1/chat/completions"
 API_BASE_ENV = "YUNOBALLIZER_API_BASE"

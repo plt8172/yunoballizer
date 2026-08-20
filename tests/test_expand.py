@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yunoballizer import expand
+from yunoballizer.commands import expand
 
 
 class ExpandTests(unittest.TestCase):

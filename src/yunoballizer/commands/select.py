@@ -33,11 +33,12 @@ import tempfile
 import time
 from pathlib import Path
 
+from .. import config, termui
+from ..storage import VIDEO_EXTS, find_caption, review_link_name
 from . import accounts as accounts_mod
-from . import config, larp, termui
-from .storage import VIDEO_EXTS, find_caption, review_link_name
+from . import larp
 
-logger = logging.getLogger("yunoballizer.select")
+logger = logging.getLogger(__name__)
 
 
 def _load_log() -> dict:

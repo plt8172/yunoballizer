@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yunoballizer import config, curate, llm
+from yunoballizer import config, llm
+from yunoballizer.commands import curate
 
 
 class CurateRunTests(unittest.TestCase):

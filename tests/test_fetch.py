@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from yunoballizer import fetch
+from yunoballizer.commands import fetch
 
 
 class _FakePost:

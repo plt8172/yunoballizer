@@ -13,7 +13,7 @@ import getpass
 import json
 from pathlib import Path
 
-from . import config
+from .. import config
 
 
 def _profiles_dir() -> Path:
@@ -94,7 +94,7 @@ def save_profile(
 def configure(name: str) -> None:
     """Interactively prompt for an API key (hidden) and optional
     model/api-base, then save and activate the named profile."""
-    from . import llm  # local: avoids a module-level cycle with llm.py
+    from .. import llm  # local: avoids a module-level cycle with llm.py
 
     api_key = getpass.getpass(
         f"API key for {name!r} (hidden, e.g. a free key at https://console.groq.com/keys): "

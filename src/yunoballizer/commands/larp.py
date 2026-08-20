@@ -28,7 +28,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from . import config, llm, termui
+from .. import config, llm, termui
 
 _STYLE_NAME_RE = re.compile(r"^[A-Za-z0-9가-힣_-]{1,50}$")
 

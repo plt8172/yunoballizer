@@ -13,12 +13,12 @@ import argparse
 import logging
 from datetime import date, datetime
 
-from . import storage
-from .downloaders import instagram, tiktok, youtube
-from .downloaders import urls as urls_mod
-from .downloaders.budget import TotalBudget
+from .. import storage
+from ..downloaders import instagram, tiktok, youtube
+from ..downloaders import urls as urls_mod
+from ..downloaders.budget import TotalBudget
 
-logger = logging.getLogger("yunoballizer.download")
+logger = logging.getLogger(__name__)
 
 PLATFORMS = ("instagram", "youtube", "tiktok")
 

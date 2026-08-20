@@ -12,9 +12,10 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
-from . import auth, config
+from .. import config
+from . import auth
 
-logger = logging.getLogger("yunoballizer.fetch")
+logger = logging.getLogger(__name__)
 
 # Sources instaloader (and Instagram's own private web/app API underneath
 # it) can actually read. "liked" and "reposted" are not here on purpose --

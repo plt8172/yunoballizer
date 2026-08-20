@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from yunoballizer import accounts
+from yunoballizer.commands import accounts
 
 
 class AccountsTests(unittest.TestCase):

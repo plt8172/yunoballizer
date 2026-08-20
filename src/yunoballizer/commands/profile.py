@@ -5,7 +5,7 @@ import json
 import re
 from collections import Counter
 
-from . import config
+from .. import config
 
 HASHTAG_RE = re.compile(r"#(\w+)")
 WORD_RE = re.compile(r"[A-Za-z가-힣]{2,}")

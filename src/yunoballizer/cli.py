@@ -9,11 +9,10 @@ import zlib
 
 from . import config, llm, storage
 from .commands import accounts as accounts_mod
-from .commands import auth, download as download_cmd, expand, fetch, prune
+from .commands import urls as urls_mod
+from .commands import auth, discover, download as download_cmd, fetch, prune
 from .commands import brain as brain_mod
 from .commands import larp as larp_mod
-from .commands import profile as profile_mod
-from .commands import curate as curate_mod
 from .commands import select as select_mod
 
 logger = logging.getLogger("yunoballizer")
@@ -32,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     fetch_parser = sub.add_parser(
         "fetch",
-        help="Requires an active session (see `auth login`). Adds accounts from Instagram to accounts.txt",
+        help="Requires an active session (see `auth login`). Adds Instagram accounts to inputs.json",
     )
     fetch_parser.add_argument(
         "-l", "--limit", type=int, default=None,
@@ -47,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fetch_parser.add_argument(
         "--sync", action="store_true",
-        help="Make accounts.txt match exactly what's found this run -- removes any account not "
+        help="Make the Instagram input list match exactly what's found this run -- removes any account not "
              "in the selected source(s), not just adds new ones",
     )
     fetch_parser.add_argument(
@@ -99,9 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Instagram username(s) to remove (default: just the active session)",
     )
 
-    sub.add_parser("expand", help="No login required. Expands Instagram accounts.txt from downloaded caption mentions")
-
-    accounts_parser = sub.add_parser("accounts", help="View or edit the per-platform accounts.txt lists")
+    accounts_parser = sub.add_parser("accounts", help="View or edit per-platform account IDs in inputs.json")
     accounts_sub = accounts_parser.add_subparsers(dest="accounts_command", required=True)
 
     accounts_list_parser = accounts_sub.add_parser("list", help="List monitored accounts")
@@ -117,21 +114,44 @@ def build_parser() -> argparse.ArgumentParser:
     accounts_remove_parser = accounts_sub.add_parser("remove", help="Stop monitoring an account")
     accounts_remove_parser.add_argument("platform", choices=accounts_mod.PLATFORMS)
     accounts_remove_parser.add_argument("username")
-    sub.add_parser("profile", help="Build/refresh the content profile from downloaded Instagram captions")
-    sub.add_parser("curate", help="Curate new posts against the content profile")
 
-    sub.add_parser(
+    urls_parser = sub.add_parser("urls", help="View or edit persistent URLs in inputs.json")
+    urls_sub = urls_parser.add_subparsers(dest="urls_command", required=True)
+    urls_sub.add_parser("list", help="List saved URLs")
+    urls_add_parser = urls_sub.add_parser("add", help="Add a URL to future downloads")
+    urls_add_parser.add_argument("url")
+    urls_remove_parser = urls_sub.add_parser("remove", help="Remove a URL from future downloads")
+    urls_remove_parser.add_argument("url")
+
+    discover_parser = sub.add_parser(
+        "discover", help="Find new Instagram accounts from selected posts, similar accounts, and mentions"
+    )
+    discover_parser.add_argument(
+        "-l", "--limit", type=int, default=10,
+        help="Maximum account candidates to show (default: 10)",
+    )
+    discover_parser.add_argument(
+        "--add", action="store_true",
+        help="Add the shown candidates to inputs.json (default: preview only)",
+    )
+
+    select_parser = sub.add_parser(
         "select",
-        help="Browse review/ one item at a time (arrows to move, s/d to select/deselect, "
-             "ctrl+s/ctrl+d to add/remove the item's account, "
-             "o to open in your OS's default viewer/player, Enter/q to finish)",
+        help="Select downloads manually, or automatically with --auto",
+    )
+    select_parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Use the LLM to select new downloads from manual selections and rejections",
+    )
+    select_parser.add_argument(
+        "-l", "--limit", type=int, default=None,
+        help="Maximum new posts to judge in --auto mode (default: 20)",
     )
     sub.add_parser("export", help="Copy/hardlink selected media into selected/")
 
-    sub.add_parser("all", help="Run download then curate (cron entry point)")
-
     brain_parser = sub.add_parser(
-        "brain", help="Configure named AI provider profiles used by larp and curate"
+        "brain", help="Configure named AI provider profiles used by select, discover, and larp"
     )
     brain_sub = brain_parser.add_subparsers(dest="brain_command")
     brain_config_parser = brain_sub.add_parser(
@@ -225,11 +245,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_expand() -> None:
-    added_caption = expand.scan_caption_mentions()
-    logger.info("New Instagram accounts added from caption mentions: %d", added_caption)
-
-
 def _run_larp(args: argparse.Namespace) -> None:
     if args.larp_command == "add":
         try:
@@ -276,9 +291,9 @@ def _run_larp(args: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None) -> None:
     argv = list(argv if argv is not None else sys.argv[1:])
     if argv == ["ball"]:
-        from . import templates
+        from .commands import _INDEX
         print()
-        print(zlib.decompress(base64.b64decode(templates._INDEX)).decode())
+        print(zlib.decompress(base64.b64decode(_INDEX)).decode())
         print()
         return
 
@@ -308,8 +323,6 @@ def main(argv: list[str] | None = None) -> None:
             auth.switch(args.username)
         elif args.auth_command == "logout":
             auth.logout(args.username)
-    elif args.command == "expand":
-        _run_expand()
     elif args.command == "accounts":
         if args.accounts_command == "list":
             for platform, names in accounts_mod.list_accounts(args.platform).items():
@@ -324,14 +337,36 @@ def main(argv: list[str] | None = None) -> None:
             username = args.username.strip().lstrip("@").lower()
             removed = accounts_mod.remove(args.platform, args.username)
             print(f"{'Removed' if removed else 'Not found:'} @{username} ({args.platform})")
+    elif args.command == "urls":
+        if args.urls_command == "list":
+            urls = urls_mod.list_urls()
+            print(f"urls ({len(urls)}):")
+            for url in urls:
+                print(f"  {url}")
+        elif args.urls_command == "add":
+            added = urls_mod.add(args.url)
+            url = args.url.strip()
+            print(f"{'Added' if added else 'Already present:'} {url}")
+        elif args.urls_command == "remove":
+            removed = urls_mod.remove(args.url)
+            url = args.url.strip()
+            print(f"{'Removed' if removed else 'Not found:'} {url}")
     elif args.command == "download":
         download_cmd.run(args)
-    elif args.command == "profile":
-        profile_mod.build()
-    elif args.command == "curate":
-        curate_mod.run()
+    elif args.command == "discover":
+        if args.limit < 1:
+            raise SystemExit("--limit must be at least 1")
+        discover.run(limit=args.limit, add=args.add)
     elif args.command == "select":
-        select_mod.run_select()
+        if args.auto:
+            limit = 20 if args.limit is None else args.limit
+            if limit < 1:
+                raise SystemExit("--limit must be at least 1")
+            select_mod.run_auto(limit=limit)
+        else:
+            if args.limit is not None:
+                raise SystemExit("--limit requires --auto")
+            select_mod.run_select()
     elif args.command == "export":
         select_mod.run_export()
     elif args.command == "larp":
@@ -355,10 +390,6 @@ def main(argv: list[str] | None = None) -> None:
         elif args.brain_command == "remove":
             brain_mod.remove_profile(args.name)
             print(f"Removed brain profile {args.name!r}.")
-    elif args.command == "all":
-        download_cmd._run_download()
-        if (config.DERIVED_DIR / profile_mod.PROFILE_FILENAME).exists():
-            curate_mod.run()
 
 
 if __name__ == "__main__":

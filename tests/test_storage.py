@@ -113,14 +113,14 @@ class OrganizeYtdlpTests(unittest.TestCase):
 
     def test_refresh_new_ytdlp_post_organizes_and_adds_to_review_immediately(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir = Path(tmpdir) / "sources"
+            downloaded_dir = Path(tmpdir) / "downloaded"
             review_dir = Path(tmpdir) / "review"
-            post_dir = sources_dir / "youtube" / "creator" / "vid1"
+            post_dir = downloaded_dir / "youtube" / "creator" / "vid1"
             _write(post_dir / "video.mp4", "x")
             _write(post_dir / "metadata.info.json", "{}")
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(config, "REVIEW_DIR", review_dir),
             ):
                 storage.refresh_new_ytdlp_post(post_dir)
@@ -172,15 +172,15 @@ class ReviewLinkTests(unittest.TestCase):
 
     def test_refresh_review_links_media_and_skips_profile_pics(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir = Path(tmpdir) / "sources"
+            downloaded_dir = Path(tmpdir) / "downloaded"
             review_dir = Path(tmpdir) / "review"
-            _write(sources_dir / "instagram" / "nasa" / "ABC123" / "image_01.jpg")
-            _write(sources_dir / "instagram" / "nasa" / "ABC123" / "video.mp4")
-            _write(sources_dir / "instagram" / "nasa" / "ABC123" / "old_profile_pic.jpg")
-            _write(sources_dir / "tiktok" / "acct" / "vid1" / "video.mp4")
+            _write(downloaded_dir / "instagram" / "nasa" / "ABC123" / "image_01.jpg")
+            _write(downloaded_dir / "instagram" / "nasa" / "ABC123" / "video.mp4")
+            _write(downloaded_dir / "instagram" / "nasa" / "ABC123" / "old_profile_pic.jpg")
+            _write(downloaded_dir / "tiktok" / "acct" / "vid1" / "video.mp4")
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(config, "REVIEW_DIR", review_dir),
             ):
                 added = storage.refresh_review()
@@ -197,13 +197,13 @@ class ReviewLinkTests(unittest.TestCase):
 
     def test_review_survives_deletion_and_regenerates_from_sources(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir = Path(tmpdir) / "sources"
+            downloaded_dir = Path(tmpdir) / "downloaded"
             review_dir = Path(tmpdir) / "review"
-            media = sources_dir / "youtube" / "creator" / "vid1" / "video.mp4"
+            media = downloaded_dir / "youtube" / "creator" / "vid1" / "video.mp4"
             _write(media)
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(config, "REVIEW_DIR", review_dir),
             ):
                 self.assertEqual(storage.refresh_review(), 1)
@@ -218,13 +218,13 @@ class ReviewLinkTests(unittest.TestCase):
 
     def test_refresh_review_prunes_dangling_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir = Path(tmpdir) / "sources"
+            downloaded_dir = Path(tmpdir) / "downloaded"
             review_dir = Path(tmpdir) / "review"
-            media = sources_dir / "tiktok" / "acct" / "vid1" / "video.mp4"
+            media = downloaded_dir / "tiktok" / "acct" / "vid1" / "video.mp4"
             _write(media)
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(config, "REVIEW_DIR", review_dir),
             ):
                 storage.refresh_review()
@@ -242,12 +242,12 @@ class ReviewProgressTests(unittest.TestCase):
         # added, so a naive single trailing call for a final summary always
         # reports 0. ReviewProgress must sum every call instead.
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir = Path(tmpdir) / "sources"
+            downloaded_dir = Path(tmpdir) / "downloaded"
             review_dir = Path(tmpdir) / "review"
-            _write(sources_dir / "youtube" / "creator" / "vid1" / "video.mp4")
+            _write(downloaded_dir / "youtube" / "creator" / "vid1" / "video.mp4")
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(config, "REVIEW_DIR", review_dir),
             ):
                 progress = storage.ReviewProgress()
@@ -257,7 +257,7 @@ class ReviewProgressTests(unittest.TestCase):
                 self.assertEqual(progress.total, 1)
 
                 # Second item lands later in the same run.
-                _write(sources_dir / "instagram" / "nasa" / "post1" / "image.jpg")
+                _write(downloaded_dir / "instagram" / "nasa" / "post1" / "image.jpg")
                 self.assertEqual(progress.refresh(), 1)
                 self.assertEqual(progress.total, 2)
 

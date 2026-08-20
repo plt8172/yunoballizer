@@ -1,9 +1,9 @@
-"""Removes config, data, and log directories created by this app.
+"""Removes config, data, and state directories created by this app.
 
 This does NOT remove the installed Python package itself — that's the job
 of your package manager (pip uninstall / pipx uninstall / etc.). This only
 cleans up the files this app creates on disk (config, collected content,
-logs) that a package manager has no knowledge of and won't remove for you.
+and state) that a package manager has no knowledge of and won't remove.
 """
 from __future__ import annotations
 

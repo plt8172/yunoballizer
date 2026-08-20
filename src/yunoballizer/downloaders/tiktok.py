@@ -32,13 +32,12 @@ def harvest(
     progress = progress if progress is not None else storage.ReviewProgress()
 
     if accounts is None:
-        accounts_file = config.CONFIG_DIR / "tiktok" / "accounts.txt"
-        accounts = config.read_lines(accounts_file)
+        accounts = config.input_values("tiktok")
         if not accounts:
-            logger.info("%s is empty, skipping", accounts_file)
+            logger.info("No TikTok accounts configured, skipping")
             return
 
-    out_dir = config.SOURCES_DIR / "tiktok"
+    out_dir = config.DOWNLOADED_DIR / "tiktok"
     archive = config.ARCHIVE_DIR / "tiktok.txt"
 
     date_opts = {}

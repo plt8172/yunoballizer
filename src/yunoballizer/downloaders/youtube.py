@@ -31,11 +31,11 @@ def harvest(
         return
     progress = progress if progress is not None else storage.ReviewProgress()
 
-    out_dir = config.SOURCES_DIR / "youtube"
+    out_dir = config.DOWNLOADED_DIR / "youtube"
     archive = config.ARCHIVE_DIR / "youtube.txt"
 
     if accounts is None:
-        accounts = config.read_lines(config.CONFIG_DIR / "youtube" / "accounts.txt")
+        accounts = config.input_values("youtube")
 
     date_opts = {}
     if since is not None or until is not None:
@@ -52,7 +52,8 @@ def harvest(
         if account_limit <= 0:
             continue
 
-        url = account if account.startswith("http") else f"https://www.youtube.com/{account}"
+        account_id = account.lstrip("@")
+        url = f"https://www.youtube.com/@{account_id}"
         shorts_url = url.rstrip("/") + "/shorts"
         logger.info("[account] checking %s...", shorts_url)
         download(

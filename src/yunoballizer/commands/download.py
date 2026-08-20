@@ -1,4 +1,4 @@
-"""`yuno download`: anonymous harvesting of accounts.txt/urls.txt, or a single ad-hoc target.
+"""`yuno download`: anonymous harvesting of inputs.json, or a single ad-hoc target.
 
 Split out of cli.py once this grew past a couple of argparse options: this
 module owns the download subparser's flags, the multi-account/platform
@@ -43,7 +43,7 @@ def _is_url(value: str) -> bool:
 
 def add_subparser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     download_parser = sub.add_parser(
-        "download", help="No login required. Anonymous harvesting of accounts + urls.txt"
+        "download", help="No login required. Anonymous harvesting of inputs.json"
     )
     download_parser.add_argument(
         "-l", "--limit", type=int, default=20,
@@ -56,7 +56,7 @@ def add_subparser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     download_parser.add_argument(
         "-p", "--platform", action="append", choices=PLATFORMS, dest="platforms", default=None,
         help="Restrict harvesting to one platform; repeat to allow more than one "
-             "(default: all configured platforms). Also excludes urls.txt for that run, "
+             "(default: all configured platforms). Also excludes configured URLs for that run, "
              "since it isn't tied to a single platform",
     )
     download_parser.add_argument(
@@ -87,8 +87,7 @@ def add_subparser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
         "target", nargs="?", default=None,
         help="Harvest a single target instead of the configured lists: an account "
              "across instagram/youtube/tiktok (must start with '@', e.g. '@nasa'), "
-             "or a direct post/video URL (Instagram/YouTube/TikTok/etc., same as a "
-             "urls.txt line) to download just that one item",
+             "or a direct post/video URL (Instagram/YouTube/TikTok/etc.) to download just that one item",
     )
     return download_parser
 
@@ -139,15 +138,11 @@ def _run_download(
 def _run_target_url(url: str) -> None:
     """Download a single ad-hoc post/video URL passed directly as `yuno download`'s target.
 
-    Same routing urls.txt uses: Instagram links go through Instaloader
-    (instagram.harvest_urls), everything else through yt-dlp
-    (urls_mod.download_urls) -- see those functions for why.
+    Uses the same URL router as configured URLs: Instagram links go through
+    Instaloader and everything else through yt-dlp.
     """
     progress = storage.ReviewProgress()
-    if instagram.is_instagram_url(url):
-        instagram.harvest_urls([url], progress=progress)
-    else:
-        urls_mod.download_urls([url], progress=progress)
+    urls_mod.download_urls([url], progress=progress)
     logger.info("New items added to review/: %d", progress.total)
 
 

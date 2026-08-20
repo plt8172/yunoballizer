@@ -1,4 +1,0 @@
-# YouTube accounts to monitor for shorts (no @, one per line)
-# Example:
-# MrBeast
-# veritasium

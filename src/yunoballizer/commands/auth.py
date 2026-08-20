@@ -39,11 +39,11 @@ INTERACTIVE_LOGIN_TIMEOUT_SECONDS = 300
 
 
 def _sessions_dir() -> Path:
-    return config.CONFIG_DIR / "instagram" / "sessions"
+    return config.CONFIG_DIR / "sessions"
 
 
 def _active_file() -> Path:
-    return config.CONFIG_DIR / "instagram" / "active_session"
+    return _sessions_dir() / "active"
 
 
 def _session_file(username: str) -> Path:

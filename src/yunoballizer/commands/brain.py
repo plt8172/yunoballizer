@@ -1,5 +1,5 @@
 """Manages named AI provider profiles (API key + optional model/api-base)
-used by the shared LLM client (llm.py), so `yuno larp`/`yuno curate` don't
+used by the shared LLM client (llm.py), so `yuno larp`/`yuno select --auto` don't
 need YUNOBALLIZER_API_KEY exported in every shell.
 
 Mirrors auth.py's saved-Instagram-session pattern: multiple profiles can
@@ -21,7 +21,7 @@ def _profiles_dir() -> Path:
 
 
 def _active_file() -> Path:
-    return config.CONFIG_DIR / "brain" / "active_profile"
+    return _profiles_dir() / "active"
 
 
 def _profile_file(name: str) -> Path:

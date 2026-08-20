@@ -1,13 +1,16 @@
-"""Manual photo selection: browse review/ one item at a time, record picks in
-a manifest, then materialize the manifest into selected/.
+"""Manual and LLM-assisted selection backed by one shared manifest.
+
+Manual mode browses review/ one item at a time. Automatic mode judges new
+posts from the manual selections and rejections in selected.json. Both record
+their results there; export then materializes selected items into selected/.
 
 Deliberately decoupled from the filesystem: review/ stays a disposable
 symlink index (see storage.py), and the "what did I pick" state lives in
-selection_log.json instead of being encoded via symlinks or deletions.
+selected.json instead of being encoded via symlinks or deletions.
 
 Saving the current item's caption as a larp template ('c') is a completely
 separate action from picking favorites ('s'): it doesn't touch
-selection_log.json or require the current item to be selected, and 's'
+selected.json or require the current item to be selected, and 's'
 never touches larp's template files. See larp.py for where it lands.
 
 The picker shows one item at a time (account / image / caption) rather than
@@ -33,36 +36,52 @@ import tempfile
 import time
 from pathlib import Path
 
-from .. import config, termui
-from ..storage import VIDEO_EXTS, find_caption, review_link_name
+from .. import config, llm, termui
+from ..storage import MEDIA_EXTS, VIDEO_EXTS, find_caption, review_link_name
 from . import accounts as accounts_mod
 from . import larp
 
 logger = logging.getLogger(__name__)
 
+MAX_EXAMPLES = 20
+MAX_CAPTION_CHARS = 600
+
 
 def _load_log() -> dict:
-    if config.SELECTION_LOG_PATH.exists():
-        return json.loads(config.SELECTION_LOG_PATH.read_text(encoding="utf-8"))
+    if config.SELECTED_PATH.exists():
+        return json.loads(config.SELECTED_PATH.read_text(encoding="utf-8"))
     return {}
 
 
 def _save_log(log: dict) -> None:
-    config.SELECTION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    config.SELECTION_LOG_PATH.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
+    config.SELECTED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    config.SELECTED_PATH.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _is_selected(entry: dict) -> bool:
+    return entry.get("status") == "selected"
+
+
+def selected_state() -> dict:
+    """Return the shared manual/automatic selection state."""
+    return _load_log()
 
 
 def _selected_paths() -> set[Path]:
-    """Return manifest entries as canonical paths under the configured sources root."""
-    sources_dir = config.SOURCES_DIR.resolve()
-    return {(sources_dir / key).resolve() for key in _load_log()}
+    """Return selected entries as canonical paths under the configured downloaded root."""
+    downloaded_dir = config.DOWNLOADED_DIR.resolve()
+    return {
+        (downloaded_dir / key).resolve()
+        for key, entry in _load_log().items()
+        if _is_selected(entry)
+    }
 
 
 def _describe(path: Path) -> tuple[str, str, str, str]:
-    """Pull (platform, account, post_id, filename) out of the sources/-relative
+    """Pull (platform, account, post_id, filename) out of the downloaded/-relative
     path alone -- no metadata.json.xz parsing needed."""
     try:
-        parts = path.resolve().relative_to(config.SOURCES_DIR.resolve()).parts
+        parts = path.resolve().relative_to(config.DOWNLOADED_DIR.resolve()).parts
     except ValueError:
         parts = ()
     if len(parts) < 3:
@@ -81,7 +100,7 @@ def _format_size(num_bytes: int) -> str:
 
 
 def _account_action(path: Path, add: bool) -> str:
-    """Add/remove the current item's account to/from its platform's accounts.txt."""
+    """Add/remove the current item's account ID in inputs.json."""
     platform, account, _post_id, _filename = _describe(path)
     if platform not in accounts_mod.PLATFORMS or not account or account == "unknown":
         return "No monitored account for this item."
@@ -92,15 +111,30 @@ def _account_action(path: Path, add: bool) -> str:
     return f"{'Removed' if changed else 'Not found:'} @{account} ({platform})"
 
 
-def _render_item(path: Path, index: int, total: int, marked: set[Path], status: str = "") -> None:
+def _render_item(
+    path: Path,
+    index: int,
+    total: int,
+    marked: set[Path],
+    status: str = "",
+    rejected: set[Path] | None = None,
+) -> None:
     print("\x1b[2J\x1b[H", end="")
     resolved = path.resolve()
     platform, account, post_id, filename = _describe(path)
     size = _format_size(resolved.stat().st_size)
-    star = " [SELECTED]" if resolved in marked else ""
-    header = f"[{index + 1}/{total}] {platform} / {account} / {post_id} / {filename} ({size}){star}"
+    if resolved in marked:
+        decision = " [SELECTED]"
+    elif rejected is not None and resolved in rejected:
+        decision = " [REJECTED]"
+    else:
+        decision = ""
+    header = (
+        f"[{index + 1}/{total}] {platform} / {account} / {post_id} / "
+        f"{filename} ({size}){decision}"
+    )
     footer = (
-        "<-/-> move   s select   d deselect   c save caption as larp template   "
+        "<-/-> move   s select   d reject   c save caption as larp template   "
         "ctrl+s add account   ctrl+d remove account   o open natively   Enter/q finish"
     )
 
@@ -177,11 +211,15 @@ def _prompt_larp_style() -> str | None:
     return style or None
 
 
-def pick(source_dir: Path | None = None) -> list[Path]:
-    """Browse source_dir one item at a time and return whatever got marked with 's'.
+def pick(
+    source_dir: Path | None = None,
+    rejected: set[Path] | None = None,
+) -> list[Path]:
+    """Browse source_dir and return selections while collecting explicit rejections.
 
     Marked paths are resolved (symlinks in review/ followed) so callers get
-    the canonical sources/ path rather than the disposable review/ link.
+    the canonical downloaded/ path rather than the disposable review/ link.
+    If rejected is provided, pressing 'd' adds the resolved path to that set.
     """
     source_dir = source_dir if source_dir is not None else config.REVIEW_DIR
     files = sorted(p for p in source_dir.iterdir() if p.is_file()) if source_dir.exists() else []
@@ -191,7 +229,8 @@ def pick(source_dir: Path | None = None) -> list[Path]:
     index = 0
     available = {path.resolve() for path in files}
     marked = _selected_paths() & available
-    _render_item(files[index], index, len(files), marked)
+    rejected = rejected if rejected is not None else set()
+    _render_item(files[index], index, len(files), marked, rejected=rejected)
     while True:
         key = termui.read_key()
         status = ""
@@ -208,9 +247,13 @@ def pick(source_dir: Path | None = None) -> list[Path]:
                 continue
             index = new_index
         elif key == "s":
-            marked.add(files[index].resolve())
+            resolved = files[index].resolve()
+            marked.add(resolved)
+            rejected.discard(resolved)
         elif key == "d":
-            marked.discard(files[index].resolve())
+            resolved = files[index].resolve()
+            marked.discard(resolved)
+            rejected.add(resolved)
         elif key == "\x13":  # ctrl+s
             status = _account_action(files[index], add=True)
         elif key == "\x04":  # ctrl+d
@@ -233,7 +276,7 @@ def pick(source_dir: Path | None = None) -> list[Path]:
                         input("Press Enter to continue...")
         else:
             continue
-        _render_item(files[index], index, len(files), marked, status)
+        _render_item(files[index], index, len(files), marked, status, rejected=rejected)
 
     return list(marked)
 
@@ -300,37 +343,205 @@ def open_native(path: Path) -> None:
         subprocess.run(["xdg-open", str(path)])
 
 
-def record_selection(paths: list[Path], candidates: list[Path] | None = None) -> int:
-    """Update selected paths and return the number of manifest changes.
+def record_selection(
+    paths: list[Path],
+    candidates: list[Path] | None = None,
+    rejected: set[Path] | None = None,
+) -> int:
+    """Update selected paths and return the number of selection-state changes.
 
-    When candidates is supplied, entries in that browsed set are synchronized
-    so deselections are recorded. Entries outside the set remain untouched.
-    Without candidates this retains the original additive behavior.
+    When candidates is supplied, newly selected items become manual selections
+    and previously selected items that were deselected become manual
+    rejections. Untouched undecided items remain undecided so automatic
+    selection may judge them. Without candidates, the supplied paths are
+    selected additively.
     """
     log = _load_log()
-    sources_dir = config.SOURCES_DIR.resolve()
-    selected = dict(log)
+    downloaded_dir = config.DOWNLOADED_DIR.resolve()
+    updated = dict(log)
+    chosen = {path.resolve() for path in paths}
+    explicitly_rejected = {path.resolve() for path in rejected or set()}
 
     if candidates is not None:
         for path in candidates:
             try:
-                key = str(path.resolve().relative_to(sources_dir))
+                key = str(path.resolve().relative_to(downloaded_dir))
             except ValueError:
                 continue
-            selected.pop(key, None)
+            previous = log.get(key, {})
+            if path.resolve() in chosen:
+                if previous.get("status") == "selected":
+                    continue
+                status = "selected"
+            elif path.resolve() in explicitly_rejected:
+                status = "rejected"
+            elif previous.get("status") == "selected":
+                status = "rejected"
+            else:
+                # Merely leaving an unseen/unselected item unmarked is not an
+                # explicit rejection. Keep it undecided so automatic selection
+                # may judge it.
+                continue
+            if previous.get("status") == status and previous.get("source") == "manual":
+                continue
+            updated[key] = {
+                "status": status,
+                "source": "manual",
+                "decided_at": time.time(),
+            }
 
     for path in paths:
         try:
-            key = str(path.resolve().relative_to(sources_dir))
+            key = str(path.resolve().relative_to(downloaded_dir))
         except ValueError:
-            logger.warning("Skipping %s: not under sources/", path)
+            logger.warning("Skipping %s: not under downloaded/", path)
             continue
-        selected[key] = log.get(key, {"selected_at": time.time()})
+        if candidates is not None:
+            continue
+        previous = log.get(key, {})
+        if previous.get("status") == "selected" and previous.get("source") == "manual":
+            continue
+        updated[key] = {
+            "status": "selected",
+            "source": "manual",
+            "decided_at": time.time(),
+        }
 
-    changes = len(set(log) ^ set(selected))
+    changes = sum(1 for key in set(log) | set(updated) if log.get(key) != updated.get(key))
     if changes:
-        _save_log(selected)
+        _save_log(updated)
     return changes
+
+
+def record_automatic_selections(selections: dict[Path, bool]) -> int:
+    """Persist automatic selections without overriding any manual selection."""
+    log = _load_log()
+    updated = dict(log)
+    downloaded_dir = config.DOWNLOADED_DIR.resolve()
+
+    for path, keep in selections.items():
+        try:
+            key = str(path.resolve().relative_to(downloaded_dir))
+        except ValueError:
+            continue
+        if log.get(key, {}).get("source") == "manual":
+            continue
+        updated[key] = {
+            "status": "selected" if keep else "rejected",
+            "source": "auto",
+            "decided_at": time.time(),
+        }
+
+    changes = sum(1 for key in set(log) | set(updated) if log.get(key) != updated.get(key))
+    if changes:
+        _save_log(updated)
+    return changes
+
+
+def _taste_context(log: dict) -> str:
+    examples: dict[str, list[str]] = {"selected": [], "rejected": []}
+    seen_posts: set[Path] = set()
+
+    ordered_entries = sorted(
+        log.items(), key=lambda item: item[1].get("decided_at", 0), reverse=True
+    )
+    for key, entry in ordered_entries:
+        status = entry.get("status")
+        if entry.get("source") != "manual" or status not in examples:
+            continue
+        media_path = config.DOWNLOADED_DIR / key
+        if media_path.parent in seen_posts:
+            continue
+        seen_posts.add(media_path.parent)
+        caption = find_caption(media_path).strip()
+        if caption:
+            examples[status].append(caption[:MAX_CAPTION_CHARS])
+        if sum(len(items) for items in examples.values()) >= MAX_EXAMPLES:
+            break
+
+    parts = []
+    if examples["selected"]:
+        parts.append(
+            "Posts the user manually selected:\n"
+            + "\n\n".join(f"- {caption}" for caption in examples["selected"])
+        )
+    if examples["rejected"]:
+        parts.append(
+            "Posts the user manually rejected:\n"
+            + "\n\n".join(f"- {caption}" for caption in examples["rejected"])
+        )
+    if not parts:
+        raise SystemExit(
+            "Automatic selection needs a taste signal. Manually select or reject at least "
+            "one captioned item with `yuno select`."
+        )
+    return "\n\n".join(parts)
+
+
+def _ask_llm(candidate: Path, taste_context: str, *, api_key: str) -> bool:
+    platform, account, _post_id, _filename = _describe(candidate)
+    caption = find_caption(candidate).strip()[:MAX_CAPTION_CHARS]
+    prompt = f"""Decide whether a new social-media post matches this user's demonstrated taste.
+
+Taste evidence:
+{taste_context}
+
+Candidate:
+- platform: {platform}
+- account: @{account}
+- caption: {caption or "(none)"}
+
+Answer with exactly one word: yes or no."""
+    answer = llm.call(prompt, api_key=api_key, max_tokens=5, temperature=0)
+    return answer.strip().lower() == "yes"
+
+
+def _unreviewed_posts(log: dict) -> list[list[Path]]:
+    reviewed = set(log)
+    posts: dict[Path, list[Path]] = {}
+    if not config.DOWNLOADED_DIR.exists():
+        return []
+    for path in config.DOWNLOADED_DIR.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in MEDIA_EXTS:
+            continue
+        posts.setdefault(path.parent, []).append(path)
+    return [
+        sorted(paths)
+        for paths in posts.values()
+        if not any(
+            str(path.resolve().relative_to(config.DOWNLOADED_DIR.resolve())) in reviewed
+            for path in paths
+        )
+    ]
+
+
+def run_auto(*, limit: int = 20) -> None:
+    api_key = llm.resolve_api_key()
+    if not api_key:
+        raise SystemExit("No LLM profile configured. Run `yuno brain config` first.")
+
+    log = selected_state()
+    context = _taste_context(log)
+    selections: dict[Path, bool] = {}
+    checked = kept = 0
+
+    for media_paths in _unreviewed_posts(log)[:limit]:
+        try:
+            keep = _ask_llm(media_paths[0], context, api_key=api_key)
+        except llm.LlmError as exc:
+            logger.error("LLM judgment failed for %s: %s", media_paths[0].parent, exc)
+            continue
+        checked += 1
+        kept += int(keep)
+        selections.update({path: keep for path in media_paths})
+
+    changed = record_automatic_selections(selections)
+    logger.info(
+        "Automatically reviewed: %d posts, selected: %d, selection state changes: %d",
+        checked,
+        kept,
+        changed,
+    )
 
 
 def export() -> int:
@@ -340,8 +551,10 @@ def export() -> int:
     config.SELECTED_DIR.mkdir(parents=True, exist_ok=True)
 
     exported = 0
-    for key in log:
-        source = config.SOURCES_DIR / key
+    for key, entry in log.items():
+        if not _is_selected(entry):
+            continue
+        source = config.DOWNLOADED_DIR / key
         if not source.exists():
             logger.warning("Selected file missing, skipping: %s", source)
             continue
@@ -357,14 +570,15 @@ def export() -> int:
 
 
 def run_select() -> None:
-    marked = pick()
+    rejected: set[Path] = set()
+    marked = pick(rejected=rejected)
     candidates = (
         [path for path in config.REVIEW_DIR.iterdir() if path.is_file()]
         if config.REVIEW_DIR.exists()
         else []
     )
-    changes = record_selection(marked, candidates=candidates)
-    logger.info("Selected: %d, selection manifest changes: %d", len(marked), changes)
+    changes = record_selection(marked, candidates=candidates, rejected=rejected)
+    logger.info("Selected: %d, selection state changes: %d", len(marked), changes)
 
 
 def run_export() -> None:

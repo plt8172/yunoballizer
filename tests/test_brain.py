@@ -96,6 +96,10 @@ class BrainProfileTests(unittest.TestCase):
         dir_mode = stat.S_IMODE(brain._profiles_dir().stat().st_mode)
         active_mode = stat.S_IMODE(brain._active_file().stat().st_mode)
 
+        self.assertEqual(
+            brain._active_file(),
+            brain.config.CONFIG_DIR / "brain" / "profiles" / "active",
+        )
         self.assertEqual(profile_mode, 0o600)
         self.assertEqual(dir_mode, 0o700)
         self.assertEqual(active_mode, 0o600)

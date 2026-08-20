@@ -18,15 +18,15 @@ class RecordSelectionTests(unittest.TestCase):
     def test_adds_new_entries_and_skips_duplicates(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            sources_dir = root / "sources"
-            (sources_dir / "instagram" / "acct" / "postid").mkdir(parents=True)
-            media = sources_dir / "instagram" / "acct" / "postid" / "image_01.jpg"
+            downloaded_dir = root / "downloaded"
+            (downloaded_dir / "instagram" / "acct" / "postid").mkdir(parents=True)
+            media = downloaded_dir / "instagram" / "acct" / "postid" / "image_01.jpg"
             media.write_bytes(b"data")
-            log_path = root / "state" / "selection_log.json"
+            log_path = root / "config" / "selected.json"
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
-                patch.object(config, "SELECTION_LOG_PATH", log_path),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
+                patch.object(config, "SELECTED_PATH", log_path),
             ):
                 added_first = select.record_selection([media])
                 added_second = select.record_selection([media])
@@ -38,18 +38,18 @@ class RecordSelectionTests(unittest.TestCase):
     def test_removes_entries_missing_from_updated_selection(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            sources_dir = root / "sources"
-            post_dir = sources_dir / "instagram" / "acct" / "postid"
+            downloaded_dir = root / "downloaded"
+            post_dir = downloaded_dir / "instagram" / "acct" / "postid"
             post_dir.mkdir(parents=True)
             first = post_dir / "image_01.jpg"
             second = post_dir / "image_02.jpg"
             first.write_bytes(b"first")
             second.write_bytes(b"second")
-            log_path = root / "state" / "selection_log.json"
+            log_path = root / "config" / "selected.json"
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
-                patch.object(config, "SELECTION_LOG_PATH", log_path),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
+                patch.object(config, "SELECTED_PATH", log_path),
             ):
                 select.record_selection([first, second])
                 changes = select.record_selection([second], candidates=[first, second])
@@ -58,21 +58,88 @@ class RecordSelectionTests(unittest.TestCase):
             self.assertEqual(changes, 1)
             self.assertEqual(selected, {second.resolve()})
 
-    def test_accepts_resolved_paths_when_sources_dir_is_a_symlink(self) -> None:
+    def test_unselected_unseen_candidate_remains_undecided(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            external_sources = root / "external" / "sources"
+            downloaded_dir = root / "downloaded"
+            post_dir = downloaded_dir / "instagram" / "acct" / "postid"
+            post_dir.mkdir(parents=True)
+            media = post_dir / "image.jpg"
+            media.write_bytes(b"data")
+            log_path = root / "selected.json"
+
+            with (
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
+                patch.object(config, "SELECTED_PATH", log_path),
+            ):
+                changes = select.record_selection([], candidates=[media])
+
+            self.assertEqual(changes, 0)
+            self.assertFalse(log_path.exists())
+
+    def test_explicit_rejection_is_recorded_as_manual(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            downloaded_dir = root / "downloaded"
+            post_dir = downloaded_dir / "instagram" / "acct" / "postid"
+            post_dir.mkdir(parents=True)
+            media = post_dir / "image.jpg"
+            media.write_bytes(b"data")
+            log_path = root / "selected.json"
+
+            with (
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
+                patch.object(config, "SELECTED_PATH", log_path),
+            ):
+                changes = select.record_selection(
+                    [], candidates=[media], rejected={media.resolve()}
+                )
+                stored = select.selected_state()
+
+            self.assertEqual(changes, 1)
+            self.assertEqual(stored["instagram/acct/postid/image.jpg"]["status"], "rejected")
+            self.assertEqual(stored["instagram/acct/postid/image.jpg"]["source"], "manual")
+
+    def test_retained_automatic_selection_keeps_its_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            downloaded_dir = root / "downloaded"
+            post_dir = downloaded_dir / "instagram" / "acct" / "postid"
+            post_dir.mkdir(parents=True)
+            media = post_dir / "image.jpg"
+            media.write_bytes(b"data")
+            log_path = root / "selected.json"
+            log_path.write_text(
+                '{"instagram/acct/postid/image.jpg": '
+                '{"status": "selected", "source": "auto", "decided_at": 1}}',
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
+                patch.object(config, "SELECTED_PATH", log_path),
+            ):
+                changes = select.record_selection([media], candidates=[media])
+                stored = select.selected_state()
+
+            self.assertEqual(changes, 0)
+            self.assertEqual(stored["instagram/acct/postid/image.jpg"]["source"], "auto")
+
+    def test_accepts_resolved_paths_when_downloaded_dir_is_a_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            external_sources = root / "external" / "downloaded"
             post_dir = external_sources / "instagram" / "acct" / "postid"
             post_dir.mkdir(parents=True)
             media = post_dir / "image_01.jpg"
             media.write_bytes(b"data")
-            sources_link = root / "sources"
-            sources_link.symlink_to(external_sources, target_is_directory=True)
-            log_path = root / "state" / "selection_log.json"
+            downloaded_link = root / "downloaded"
+            downloaded_link.symlink_to(external_sources, target_is_directory=True)
+            log_path = root / "config" / "selected.json"
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_link),
-                patch.object(config, "SELECTION_LOG_PATH", log_path),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_link),
+                patch.object(config, "SELECTED_PATH", log_path),
             ):
                 changes = select.record_selection([media.resolve()])
                 selected = select._selected_paths()
@@ -80,18 +147,18 @@ class RecordSelectionTests(unittest.TestCase):
             self.assertEqual(changes, 1)
             self.assertEqual(selected, {media.resolve()})
 
-    def test_skips_paths_outside_sources_dir(self) -> None:
+    def test_skips_paths_outside_downloaded_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            sources_dir = root / "sources"
-            sources_dir.mkdir()
+            downloaded_dir = root / "downloaded"
+            downloaded_dir.mkdir()
             outside = root / "elsewhere.jpg"
             outside.write_bytes(b"data")
-            log_path = root / "state" / "selection_log.json"
+            log_path = root / "config" / "selected.json"
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
-                patch.object(config, "SELECTION_LOG_PATH", log_path),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
+                patch.object(config, "SELECTED_PATH", log_path),
             ):
                 added = select.record_selection([outside])
 
@@ -100,24 +167,24 @@ class RecordSelectionTests(unittest.TestCase):
 
 class ExportTests(unittest.TestCase):
     def _setup(self, root: Path):
-        sources_dir = root / "sources"
+        downloaded_dir = root / "downloaded"
         selected_dir = root / "selected"
-        post_dir = sources_dir / "instagram" / "acct" / "postid"
+        post_dir = downloaded_dir / "instagram" / "acct" / "postid"
         post_dir.mkdir(parents=True)
         media = post_dir / "image_01.jpg"
         media.write_bytes(b"data")
-        log_path = root / "state" / "selection_log.json"
-        return sources_dir, selected_dir, media, log_path
+        log_path = root / "config" / "selected.json"
+        return downloaded_dir, selected_dir, media, log_path
 
     def test_hardlinks_selected_media_and_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            sources_dir, selected_dir, media, log_path = self._setup(root)
+            downloaded_dir, selected_dir, media, log_path = self._setup(root)
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(config, "SELECTED_DIR", selected_dir),
-                patch.object(config, "SELECTION_LOG_PATH", log_path),
+                patch.object(config, "SELECTED_PATH", log_path),
             ):
                 select.record_selection([media])
                 exported_first = select.export()
@@ -133,12 +200,12 @@ class ExportTests(unittest.TestCase):
     def test_falls_back_to_copy_across_devices(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            sources_dir, selected_dir, media, log_path = self._setup(root)
+            downloaded_dir, selected_dir, media, log_path = self._setup(root)
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(config, "SELECTED_DIR", selected_dir),
-                patch.object(config, "SELECTION_LOG_PATH", log_path),
+                patch.object(config, "SELECTED_PATH", log_path),
             ):
                 select.record_selection([media])
                 with patch("os.link", side_effect=OSError(errno.EXDEV, "cross-device link")):
@@ -153,12 +220,12 @@ class ExportTests(unittest.TestCase):
     def test_skips_missing_source_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            sources_dir, selected_dir, media, log_path = self._setup(root)
+            downloaded_dir, selected_dir, media, log_path = self._setup(root)
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(config, "SELECTED_DIR", selected_dir),
-                patch.object(config, "SELECTION_LOG_PATH", log_path),
+                patch.object(config, "SELECTED_PATH", log_path),
             ):
                 select.record_selection([media])
                 media.unlink()
@@ -219,40 +286,42 @@ class PickTests(unittest.TestCase):
 
             self.assertEqual(marked, [])
 
-    def test_d_on_an_unselected_item_is_a_noop(self) -> None:
+    def test_d_on_an_unselected_item_marks_an_explicit_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            review_dir, _ = self._review_dir_with_links(Path(tmpdir), 2)
+            review_dir, real_files = self._review_dir_with_links(Path(tmpdir), 2)
             keys = iter(["d", "q"])
+            rejected: set[Path] = set()
 
             with (
                 patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item"),
             ):
-                marked = select.pick(source_dir=review_dir)
+                marked = select.pick(source_dir=review_dir, rejected=rejected)
 
             self.assertEqual(marked, [])
+            self.assertEqual(rejected, {real_files[0]})
 
     def test_restores_persisted_selection_and_allows_deselecting_it(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            sources_dir = root / "sources"
-            post_dir = sources_dir / "instagram" / "acct" / "postid"
+            downloaded_dir = root / "downloaded"
+            post_dir = downloaded_dir / "instagram" / "acct" / "postid"
             post_dir.mkdir(parents=True)
             media = post_dir / "image_01.jpg"
             media.write_bytes(b"data")
             review_dir = root / "review"
             review_dir.mkdir()
             (review_dir / "link.jpg").symlink_to(media)
-            log_path = root / "selection_log.json"
+            log_path = root / "selected.json"
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
-                patch.object(config, "SELECTION_LOG_PATH", log_path),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
+                patch.object(config, "SELECTED_PATH", log_path),
             ):
                 select.record_selection([media])
                 rendered_marks = []
 
-                def capture_render(*args):
+                def capture_render(*args, **kwargs):
                     rendered_marks.append(set(args[3]))
 
                 with (
@@ -365,8 +434,8 @@ class PickTests(unittest.TestCase):
     def test_ctrl_s_adds_the_current_items_account(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            sources_dir = root / "sources"
-            post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
+            downloaded_dir = root / "downloaded"
+            post_dir = downloaded_dir / "instagram" / "nasa" / "ShortcodeA"
             post_dir.mkdir(parents=True)
             media = post_dir / "image_01.jpg"
             media.write_bytes(b"data")
@@ -377,7 +446,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["\x13", "q"])
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(config, "CONFIG_DIR", config_dir),
                 patch.object(termui, "read_key", side_effect=keys),
                 patch.object(select, "_render_item") as mock_render,
@@ -390,8 +459,8 @@ class PickTests(unittest.TestCase):
     def test_ctrl_d_removes_the_current_items_account(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            sources_dir = root / "sources"
-            post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
+            downloaded_dir = root / "downloaded"
+            post_dir = downloaded_dir / "instagram" / "nasa" / "ShortcodeA"
             post_dir.mkdir(parents=True)
             media = post_dir / "image_01.jpg"
             media.write_bytes(b"data")
@@ -402,7 +471,7 @@ class PickTests(unittest.TestCase):
             keys = iter(["\x04", "q"])
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(config, "CONFIG_DIR", config_dir),
             ):
                 accounts_mod.add("instagram", "nasa")
@@ -510,26 +579,26 @@ class PromptLarpStyleTests(unittest.TestCase):
 class DescribeTests(unittest.TestCase):
     def test_splits_platform_account_post_id_and_filename(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir = Path(tmpdir) / "sources"
-            post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
+            downloaded_dir = Path(tmpdir) / "downloaded"
+            post_dir = downloaded_dir / "instagram" / "nasa" / "ShortcodeA"
             post_dir.mkdir(parents=True)
             media = post_dir / "image_02.jpg"
             media.write_bytes(b"data")
 
-            with patch.object(config, "SOURCES_DIR", sources_dir):
+            with patch.object(config, "DOWNLOADED_DIR", downloaded_dir):
                 platform, account, post_id, filename = select._describe(media)
 
             self.assertEqual((platform, account, post_id, filename),
                               ("instagram", "nasa", "ShortcodeA", "image_02.jpg"))
 
-    def test_falls_back_to_bare_filename_outside_sources_dir(self) -> None:
+    def test_falls_back_to_bare_filename_outside_downloaded_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir = Path(tmpdir) / "sources"
-            sources_dir.mkdir()
+            downloaded_dir = Path(tmpdir) / "downloaded"
+            downloaded_dir.mkdir()
             outside = Path(tmpdir) / "elsewhere.jpg"
             outside.write_bytes(b"data")
 
-            with patch.object(config, "SOURCES_DIR", sources_dir):
+            with patch.object(config, "DOWNLOADED_DIR", downloaded_dir):
                 platform, account, post_id, filename = select._describe(outside)
 
             self.assertEqual((platform, account, post_id), ("", "", ""))
@@ -539,13 +608,13 @@ class DescribeTests(unittest.TestCase):
 class AccountActionTests(unittest.TestCase):
     def test_unsupported_platform_is_a_noop_with_a_message(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir = Path(tmpdir) / "sources"
-            post_dir = sources_dir / "other" / "youtube" / "nasa" / "id123"
+            downloaded_dir = Path(tmpdir) / "downloaded"
+            post_dir = downloaded_dir / "other" / "youtube" / "nasa" / "id123"
             post_dir.mkdir(parents=True)
             media = post_dir / "video.mp4"
             media.write_bytes(b"data")
 
-            with patch.object(config, "SOURCES_DIR", sources_dir):
+            with patch.object(config, "DOWNLOADED_DIR", downloaded_dir):
                 message = select._account_action(media, add=True)
 
             self.assertEqual(message, "No monitored account for this item.")
@@ -553,15 +622,15 @@ class AccountActionTests(unittest.TestCase):
 
 class RenderItemTests(unittest.TestCase):
     def test_resolves_symlink_before_looking_up_caption(self) -> None:
-        """Regression test: find_caption() needs the real sources/ post
+        """Regression test: find_caption() needs the real downloaded/ post
         directory, not review/'s flat symlink directory, or captions never
         show up even when caption.txt exists right next to the media."""
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            sources_dir = root / "sources"
+            downloaded_dir = root / "downloaded"
             review_dir = root / "review"
             review_dir.mkdir()
-            post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
+            post_dir = downloaded_dir / "instagram" / "nasa" / "ShortcodeA"
             post_dir.mkdir(parents=True)
             media = post_dir / "image_01.jpg"
             media.write_bytes(b"data")
@@ -570,7 +639,7 @@ class RenderItemTests(unittest.TestCase):
             link.symlink_to(media)
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(select, "render_preview"),
                 patch("builtins.print") as mock_print,
             ):
@@ -585,7 +654,7 @@ class RenderItemTests(unittest.TestCase):
         expected and forces a scroll, only the image's top scrolls away --
         whatever's printed last (the header) always stays on screen."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir, media = self._item(Path(tmpdir), caption=None)
+            downloaded_dir, media = self._item(Path(tmpdir), caption=None)
             order = []
 
             def fake_print(*args, **kwargs):
@@ -595,7 +664,7 @@ class RenderItemTests(unittest.TestCase):
                     order.append("print")
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(select, "render_preview", side_effect=lambda *a, **k: order.append("image")),
                 patch("builtins.print", side_effect=fake_print),
             ):
@@ -605,21 +674,21 @@ class RenderItemTests(unittest.TestCase):
             self.assertIn("print", order)
 
     def _item(self, root: Path, caption: str | None) -> tuple[Path, Path]:
-        sources_dir = root / "sources"
-        post_dir = sources_dir / "instagram" / "nasa" / "ShortcodeA"
+        downloaded_dir = root / "downloaded"
+        post_dir = downloaded_dir / "instagram" / "nasa" / "ShortcodeA"
         post_dir.mkdir(parents=True)
         media = post_dir / "image_01.jpg"
         media.write_bytes(b"data")
         if caption is not None:
             (post_dir / "caption.txt").write_text(caption, encoding="utf-8")
-        return sources_dir, media
+        return downloaded_dir, media
 
     def test_image_height_budget_never_exceeds_terminal_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir, media = self._item(Path(tmpdir), caption=None)
+            downloaded_dir, media = self._item(Path(tmpdir), caption=None)
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch("shutil.get_terminal_size", return_value=os.terminal_size((100, 40))),
                 patch.object(select, "render_preview") as mock_preview,
                 patch("builtins.print"),
@@ -632,10 +701,10 @@ class RenderItemTests(unittest.TestCase):
 
     def test_image_height_budget_accounts_for_caption_line(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir, media = self._item(Path(tmpdir), caption="a short caption")
+            downloaded_dir, media = self._item(Path(tmpdir), caption="a short caption")
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch("shutil.get_terminal_size", return_value=os.terminal_size((100, 40))),
                 patch.object(select, "render_preview") as mock_preview,
                 patch("builtins.print"),
@@ -648,10 +717,10 @@ class RenderItemTests(unittest.TestCase):
 
     def test_long_caption_is_truncated_to_a_single_line(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            sources_dir, media = self._item(Path(tmpdir), caption="x" * 500)
+            downloaded_dir, media = self._item(Path(tmpdir), caption="x" * 500)
 
             with (
-                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "DOWNLOADED_DIR", downloaded_dir),
                 patch("shutil.get_terminal_size", return_value=os.terminal_size((60, 40))),
                 patch.object(select, "render_preview"),
                 patch("builtins.print") as mock_print,

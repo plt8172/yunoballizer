@@ -1,10 +1,10 @@
 """Post-bundle filesystem layout: canonical naming and the flat review index.
 
 Every downloaded post lives as a single self-contained directory under
-sources/<platform>/<account>/<post-id>/ holding its media, caption, and
+downloaded/<platform>/<account>/<post-id>/ holding its media, caption, and
 compressed metadata together (image_01.jpg, video.mp4, caption.txt,
 metadata.json.xz). review/ is a disposable flat index of symlinks into that
-tree; deleting it and re-running `download` regenerates it from sources/.
+tree; deleting it and re-running `download` regenerates it from downloaded/.
 """
 from __future__ import annotations
 
@@ -126,7 +126,7 @@ def organize_instagram_account(account_dir: Path) -> None:
 
     Also drops anything Instaloader wrote directly in the account dir instead
     of a post's subdirectory -- e.g. its own profile-level metadata JSON
-    (<account>_<userid>.json.xz) or resume-iterator file. sources/ is meant
+    (<account>_<userid>.json.xz) or resume-iterator file. downloaded/ is meant
     to hold nothing but post bundles, and we don't use either of those.
     """
     if not account_dir.exists():
@@ -211,23 +211,23 @@ def find_caption(media_path: Path) -> str:
 
 
 # --------------------------------------------------------------------------
-# review/: a disposable flat symlink index over sources/.
+# review/: a disposable flat symlink index over downloaded/.
 # --------------------------------------------------------------------------
 
-def review_link_name(sources_relpath: Path) -> str:
-    """Build a readable, collision-safe review/ link name for a sources/-relative media path.
+def review_link_name(downloaded_relpath: Path) -> str:
+    """Build a readable, collision-safe review/ link name for a downloaded/-relative media path.
 
     The name embeds platform/account/post-id/media for readability, plus a
     short stable hash of the full relative path so it never needs to be
     parsed back to recover that information.
     """
-    parts = sources_relpath.parts
+    parts = downloaded_relpath.parts
     platform = parts[0]
     post_id = parts[-2]
     account = "-".join(parts[1:-2]) or "unknown"
     media_name = parts[-1]
     stem, ext = os.path.splitext(media_name)
-    digest = hashlib.sha256(sources_relpath.as_posix().encode("utf-8")).hexdigest()[:8]
+    digest = hashlib.sha256(downloaded_relpath.as_posix().encode("utf-8")).hexdigest()[:8]
 
     def clean(value: str) -> str:
         return _UNSAFE_CHARS_RE.sub("_", value).strip("_") or "x"
@@ -244,7 +244,7 @@ def _prune_dangling_review_links() -> None:
 
 
 def refresh_review() -> int:
-    """Add any un-indexed sources/ media to the flat review/ symlink view.
+    """Add any un-indexed downloaded/ media to the flat review/ symlink view.
 
     Returns how many links this call itself added -- not a running total, so
     calling it again right after (or after other code already refreshed
@@ -256,15 +256,15 @@ def refresh_review() -> int:
     _prune_dangling_review_links()
 
     added = 0
-    if not config.SOURCES_DIR.exists():
+    if not config.DOWNLOADED_DIR.exists():
         return added
 
-    for media_path in config.SOURCES_DIR.rglob("*"):
+    for media_path in config.DOWNLOADED_DIR.rglob("*"):
         if not media_path.is_file() or media_path.suffix.lower() not in MEDIA_EXTS:
             continue
         if "profile_pic" in media_path.stem.lower():
             continue
-        relative = media_path.relative_to(config.SOURCES_DIR)
+        relative = media_path.relative_to(config.DOWNLOADED_DIR)
         if len(relative.parts) < 3:
             continue
         name = review_link_name(relative)

@@ -12,8 +12,9 @@ content is saved.
 """
 from __future__ import annotations
 
+import json
 import os
-from importlib import resources
+import tempfile
 from pathlib import Path
 
 
@@ -55,53 +56,129 @@ DATA_DIR = _data_root()
 CONFIG_DIR = _config_root()
 STATE_DIR = _state_root()
 
-SOURCES_DIR = DATA_DIR / "sources"
+DOWNLOADED_DIR = DATA_DIR / "downloaded"
 REVIEW_DIR = DATA_DIR / "review"
-CURATED_DIR = DATA_DIR / "curated"
-DERIVED_DIR = DATA_DIR / "derived"
 SELECTED_DIR = DATA_DIR / "selected"
 
 ARCHIVE_DIR = STATE_DIR / "archives"
-LOG_DIR = STATE_DIR / "logs"
-CURATION_LOG_PATH = STATE_DIR / "curation_log.json"
-SELECTION_LOG_PATH = STATE_DIR / "selection_log.json"
+SELECTED_PATH = CONFIG_DIR / "selected.json"
 
 LARP_DIR = CONFIG_DIR / "larp"
 LARP_STYLES_DIR = LARP_DIR / "styles"
 
 ENV_FILE = CONFIG_DIR / ".env"
+INPUT_KEYS = ("instagram", "youtube", "tiktok", "urls")
 
-TEMPLATE_FILES = [
-    "instagram/accounts.txt",
-    "tiktok/accounts.txt",
-    "youtube/accounts.txt",
-    "urls.txt",
-]
+
+def inputs_path() -> Path:
+    return CONFIG_DIR / "inputs.json"
+
+
+def _empty_inputs() -> dict[str, list[str]]:
+    return {key: [] for key in INPUT_KEYS}
+
+
+def _validate_input_key(key: str) -> None:
+    if key not in INPUT_KEYS:
+        raise SystemExit(f"Unknown input key {key!r}. Choose from: {', '.join(INPUT_KEYS)}")
+
+
+def _normalize_input_values(key: str, values: list[str]) -> list[str]:
+    normalized = []
+    for value in values:
+        value = value.strip()
+        if key != "urls":
+            value = value.lstrip("@").lower()
+        if not value:
+            raise SystemExit(f"Invalid {inputs_path()}: {key!r} contains an empty value.")
+        if value not in normalized:
+            normalized.append(value)
+    return normalized
+
+
+def read_inputs() -> dict[str, list[str]]:
+    """Read and validate the unified download inputs."""
+    path = inputs_path()
+    if not path.exists():
+        return _empty_inputs()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Could not read {path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise SystemExit(f"Invalid {path}: expected a JSON object.")
+    unknown = set(raw) - set(INPUT_KEYS)
+    if unknown:
+        raise SystemExit(f"Invalid {path}: unknown key(s): {', '.join(sorted(unknown))}")
+    inputs = _empty_inputs()
+    for key in INPUT_KEYS:
+        values = raw.get(key, [])
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            raise SystemExit(f"Invalid {path}: {key!r} must be an array of strings.")
+        inputs[key] = _normalize_input_values(key, values)
+    return inputs
+
+
+def write_inputs(inputs: dict[str, list[str]]) -> None:
+    """Atomically write all unified download inputs."""
+    normalized = {
+        key: _normalize_input_values(key, list(inputs.get(key, [])))
+        for key in INPUT_KEYS
+    }
+    path = inputs_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, prefix=".inputs-", suffix=".tmp", delete=False
+    ) as handle:
+        temp_path = Path(handle.name)
+        json.dump(normalized, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    temp_path.replace(path)
+
+
+def input_values(key: str) -> list[str]:
+    _validate_input_key(key)
+    return read_inputs()[key]
+
+
+def set_input_values(key: str, values: list[str]) -> None:
+    _validate_input_key(key)
+    inputs = read_inputs()
+    inputs[key] = values
+    write_inputs(inputs)
+
+
+def add_input(key: str, value: str) -> bool:
+    _validate_input_key(key)
+    inputs = read_inputs()
+    if value in inputs[key]:
+        return False
+    inputs[key].append(value)
+    write_inputs(inputs)
+    return True
+
+
+def remove_input(key: str, value: str) -> bool:
+    _validate_input_key(key)
+    inputs = read_inputs()
+    if value not in inputs[key]:
+        return False
+    inputs[key].remove(value)
+    write_inputs(inputs)
+    return True
 
 
 def ensure_config() -> None:
-    """Create config/data/state directories and populate missing config templates."""
+    """Create config/data/state directories and the unified input file."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     for directory in (
-        SOURCES_DIR, REVIEW_DIR, CURATED_DIR, DERIVED_DIR, SELECTED_DIR,
-        ARCHIVE_DIR, LOG_DIR, LARP_STYLES_DIR,
+        DOWNLOADED_DIR, REVIEW_DIR, SELECTED_DIR,
+        ARCHIVE_DIR, LARP_STYLES_DIR,
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
-    for name in TEMPLATE_FILES:
-        dest = CONFIG_DIR / name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists():
-            continue
-        try:
-            content = (
-                resources.files("yunoballizer.templates")
-                .joinpath(name)
-                .read_text(encoding="utf-8")
-            )
-        except Exception:
-            content = ""
-        dest.write_text(content, encoding="utf-8")
+    if not inputs_path().exists():
+        write_inputs(_empty_inputs())
 
 
 def load_env_file() -> None:
@@ -124,63 +201,3 @@ def load_env_file() -> None:
             value = value[1:-1]
         if key:
             os.environ.setdefault(key, value)
-
-
-def read_lines(path: Path) -> list[str]:
-    """Return non-comment, non-empty lines from a config file."""
-    if not path.exists():
-        return []
-    lines = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#"):
-            lines.append(line)
-    return lines
-
-
-def append_line(path: Path, value: str, *, case_insensitive: bool = False) -> bool:
-    """Append a value to a config file if not already present. Returns True if actually added.
-
-    case_insensitive controls only the "already present" check -- a
-    hand-edited file with a differently-cased existing entry (accounts.txt
-    is user-editable, and Instagram/TikTok/YouTube usernames aren't
-    case-sensitive) won't get a case-variant duplicate appended next to it.
-    Off by default since not every caller's values are case-insensitive
-    (URLs in urls.txt, for one).
-    """
-    existing = set(read_lines(path))
-    check = {v.lower() for v in existing} if case_insensitive else existing
-    needle = value.lower() if case_insensitive else value
-    if needle in check:
-        return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    needs_leading_newline = False
-    if path.exists():
-        content = path.read_bytes()
-        needs_leading_newline = bool(content) and not content.endswith(b"\n")
-    with path.open("a", encoding="utf-8") as f:
-        if needs_leading_newline:
-            f.write("\n")
-        f.write(value + "\n")
-    return True
-
-
-def remove_line(path: Path, value: str, *, case_insensitive: bool = False) -> bool:
-    """Remove a value from a config file if present. Returns True if actually removed.
-
-    Comments and blank lines are left untouched -- only lines that match
-    value (after stripping) are dropped. See append_line for why
-    case_insensitive exists and defaults off.
-    """
-    if not path.exists():
-        return False
-    lines = path.read_text(encoding="utf-8").splitlines()
-    if case_insensitive:
-        needle = value.lower()
-        kept = [line for line in lines if line.strip().lower() != needle]
-    else:
-        kept = [line for line in lines if line.strip() != value]
-    if len(kept) == len(lines):
-        return False
-    path.write_text("".join(line + "\n" for line in kept), encoding="utf-8")
-    return True

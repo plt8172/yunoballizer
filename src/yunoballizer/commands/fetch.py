@@ -3,7 +3,7 @@ more sources, and add them to the anonymous download queue.
 
 Fetch deliberately stores no post media or captions -- it reuses the active
 Instagram session saved via `yuno auth login`, reads accounts out of the
-selected source(s), and adds those usernames to accounts.txt.
+selected source(s), and adds those usernames to inputs.json.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .. import config
-from . import auth
+from . import accounts, auth
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ def run(
     sources: list[str] | None = None,
     total_limit: int | None = None,
 ) -> int:
-    """Add accounts from the selected source(s) to accounts.txt.
+    """Add Instagram accounts from the selected source(s) to inputs.json.
 
     sources defaults to ["saved"]; pass e.g. ["saved", "following"] to pull
     from more than one. limit caps how many items are read *per source*
@@ -138,7 +138,7 @@ def run(
     result across every selected source, after they're merged -- with a
     single source the two end up equivalent, but only total_limit stays
     correct once more than one source is selected. With sync=True,
-    accounts.txt is made to match exactly what was found this run -- any
+    the Instagram input list is made to match exactly what was found this run -- any
     account not in that result gets removed, not just new ones added --
     unless some account's owner couldn't be resolved this run (a transient
     rate limit or network error), in which case removals are skipped
@@ -150,8 +150,6 @@ def run(
     _validate_sources(sources)
 
     loader = auth.get_loader()
-    accounts_file = config.CONFIG_DIR / "instagram" / "accounts.txt"
-
     authors: set[str] = set()
     had_failures = False
     if "saved" in sources:
@@ -170,19 +168,19 @@ def run(
                 "--sync (a resolution failure can't be told apart from an account that's "
                 "no longer in the selected source(s)). Only additions were applied."
             )
-            added = sum(config.append_line(accounts_file, name) for name in sorted(authors))
+            added = sum(accounts.add("instagram", name) for name in sorted(authors))
             logger.info("Accounts found: %d, added: %d, removed: 0 (skipped)", len(authors), added)
             return added
 
-        stale = sorted(set(config.read_lines(accounts_file)) - authors)
-        for name in stale:
-            config.remove_line(accounts_file, name)
-        added = sum(config.append_line(accounts_file, name) for name in sorted(authors))
+        existing = set(accounts.list_accounts("instagram")["instagram"])
+        stale = sorted(existing - authors)
+        config.set_input_values("instagram", sorted(authors))
+        added = len(authors - existing)
         logger.info("Accounts found: %d, added: %d, removed: %d", len(authors), added, len(stale))
         if stale:
             logger.info("Removed (no longer in selected source(s)): %s", ", ".join(stale))
         return added
 
-    added = sum(config.append_line(accounts_file, author) for author in sorted(authors))
+    added = sum(accounts.add("instagram", author) for author in sorted(authors))
     logger.info("Accounts found: %d, newly added: %d", len(authors), added)
     return added

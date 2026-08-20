@@ -1,7 +1,7 @@
 """Shared client for an OpenAI-compatible chat completions API.
 
-Used by both `yuno larp` (text generation) and `yuno curate` (optional
-AI-assisted keep/skip judgment), so the whole app configures one
+Used by `yuno larp` (text generation), `yuno select --auto` (automatic selection),
+and `yuno discover` (candidate selection), so the whole app configures one
 provider/model/key instead of each feature maintaining its own. Talks
 over plain HTTP using only the stdlib -- no new dependency -- to Groq's
 free-tier Llama models by default, or any other provider with the same

@@ -9,6 +9,16 @@ from unittest.mock import patch
 from yunoballizer.commands import fetch
 
 
+def _write_instagram_accounts(config_dir: Path, values: list[str]) -> None:
+    with patch.object(fetch.config, "CONFIG_DIR", config_dir):
+        fetch.config.set_input_values("instagram", values)
+
+
+def _read_instagram_accounts(config_dir: Path) -> list[str]:
+    with patch.object(fetch.config, "CONFIG_DIR", config_dir):
+        return fetch.config.input_values("instagram")
+
+
 class _FakePost:
     """Stands in for instaloader's Post: owner_id is free, owner_username
     is a request that's paid the first time it's read on a given instance
@@ -38,9 +48,7 @@ class SavedSourceTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
-            accounts_file = config_dir / "instagram" / "accounts.txt"
-            accounts_file.parent.mkdir(parents=True)
-            accounts_file.write_text("alpha\n", encoding="utf-8")
+            _write_instagram_accounts(config_dir, ["alpha"])
 
             with (
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
@@ -50,7 +58,7 @@ class SavedSourceTests(unittest.TestCase):
                 added = fetch.run()
 
             self.assertEqual(added, 1)
-            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "alpha\nzeta\n")
+            self.assertEqual(_read_instagram_accounts(config_dir), ["alpha", "zeta"])
 
     def test_resolves_each_unique_owner_id_only_once(self) -> None:
         # Saving several posts from the same account is the common case --
@@ -120,9 +128,8 @@ class FollowingSourceTests(unittest.TestCase):
             ):
                 added = fetch.run(sources=["following"])
 
-            accounts_file = config_dir / "instagram" / "accounts.txt"
             self.assertEqual(added, 2)
-            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "alpha\nzeta\n")
+            self.assertEqual(_read_instagram_accounts(config_dir), ["alpha", "zeta"])
 
     def test_limit_caps_how_many_followees_are_read(self) -> None:
         followees = [SimpleNamespace(username=f"user{i}") for i in range(5)]
@@ -154,9 +161,8 @@ class FollowingSourceTests(unittest.TestCase):
             ):
                 added = fetch.run(sources=["saved", "following"])
 
-            accounts_file = config_dir / "instagram" / "accounts.txt"
             self.assertEqual(added, 2)
-            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "nasa\nnatgeo\n")
+            self.assertEqual(_read_instagram_accounts(config_dir), ["nasa", "natgeo"])
 
 
 class TotalLimitTests(unittest.TestCase):
@@ -178,10 +184,9 @@ class TotalLimitTests(unittest.TestCase):
             ):
                 added = fetch.run(sources=["saved", "following"], total_limit=1)
 
-            accounts_file = config_dir / "instagram" / "accounts.txt"
             self.assertEqual(added, 1)
             # Deterministic (alphabetical), not source-order-dependent.
-            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "nasa\n")
+            self.assertEqual(_read_instagram_accounts(config_dir), ["nasa"])
 
     def test_agrees_with_limit_for_a_single_source(self) -> None:
         posts = [_FakePost(owner_id=i, username=f"user{i}") for i in range(5)]
@@ -217,9 +222,7 @@ class SyncTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
-            accounts_file = config_dir / "instagram" / "accounts.txt"
-            accounts_file.parent.mkdir(parents=True)
-            accounts_file.write_text("# comment\nalpha\nnasa\n", encoding="utf-8")
+            _write_instagram_accounts(config_dir, ["alpha", "nasa"])
 
             with (
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
@@ -229,14 +232,12 @@ class SyncTests(unittest.TestCase):
                 added = fetch.run(sync=True)
 
             self.assertEqual(added, 0)  # nasa was already present
-            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "# comment\nnasa\n")
+            self.assertEqual(_read_instagram_accounts(config_dir), ["nasa"])
 
     def test_sync_with_nothing_found_empties_the_matching_accounts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
-            accounts_file = config_dir / "instagram" / "accounts.txt"
-            accounts_file.parent.mkdir(parents=True)
-            accounts_file.write_text("alpha\n", encoding="utf-8")
+            _write_instagram_accounts(config_dir, ["alpha"])
 
             with (
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
@@ -246,16 +247,14 @@ class SyncTests(unittest.TestCase):
                 added = fetch.run(sync=True)
 
             self.assertEqual(added, 0)
-            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "")
+            self.assertEqual(_read_instagram_accounts(config_dir), [])
 
     def test_without_sync_stale_accounts_are_left_alone(self) -> None:
         posts = [_FakePost(owner_id=1, username="nasa")]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
-            accounts_file = config_dir / "instagram" / "accounts.txt"
-            accounts_file.parent.mkdir(parents=True)
-            accounts_file.write_text("alpha\n", encoding="utf-8")
+            _write_instagram_accounts(config_dir, ["alpha"])
 
             with (
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
@@ -264,7 +263,7 @@ class SyncTests(unittest.TestCase):
             ):
                 fetch.run(sync=False)
 
-            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "alpha\nnasa\n")
+            self.assertEqual(_read_instagram_accounts(config_dir), ["alpha", "nasa"])
 
     def test_sync_does_not_remove_accounts_when_resolution_failed(self) -> None:
         # "nasa" resolves fine and should still get confirmed/kept; "alpha"
@@ -276,9 +275,7 @@ class SyncTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
-            accounts_file = config_dir / "instagram" / "accounts.txt"
-            accounts_file.parent.mkdir(parents=True)
-            accounts_file.write_text("alpha\nnasa\n", encoding="utf-8")
+            _write_instagram_accounts(config_dir, ["alpha", "nasa"])
 
             with (
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
@@ -288,16 +285,14 @@ class SyncTests(unittest.TestCase):
                 added = fetch.run(sync=True)
 
             self.assertEqual(added, 0)
-            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "alpha\nnasa\n")
+            self.assertEqual(_read_instagram_accounts(config_dir), ["alpha", "nasa"])
 
     def test_sync_still_adds_successfully_resolved_accounts_despite_other_failures(self) -> None:
         posts = [_FakePost(owner_id=1, username="natgeo"), _FakePost(owner_id=2, raises=True)]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
-            accounts_file = config_dir / "instagram" / "accounts.txt"
-            accounts_file.parent.mkdir(parents=True)
-            accounts_file.write_text("alpha\n", encoding="utf-8")
+            _write_instagram_accounts(config_dir, ["alpha"])
 
             with (
                 patch.object(fetch.config, "CONFIG_DIR", config_dir),
@@ -307,7 +302,7 @@ class SyncTests(unittest.TestCase):
                 added = fetch.run(sync=True)
 
             self.assertEqual(added, 1)
-            self.assertEqual(accounts_file.read_text(encoding="utf-8"), "alpha\nnatgeo\n")
+            self.assertEqual(_read_instagram_accounts(config_dir), ["alpha", "natgeo"])
 
 
 if __name__ == "__main__":

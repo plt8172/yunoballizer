@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -60,7 +61,7 @@ class XdgPathTests(unittest.TestCase):
 
 
 class EnsureConfigTests(unittest.TestCase):
-    def test_ensure_config_creates_layout_and_templates(self) -> None:
+    def test_ensure_config_creates_layout_and_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             data_dir = root / "data"
@@ -71,31 +72,24 @@ class EnsureConfigTests(unittest.TestCase):
                 patch.object(config, "DATA_DIR", data_dir),
                 patch.object(config, "CONFIG_DIR", config_dir),
                 patch.object(config, "STATE_DIR", state_dir),
-                patch.object(config, "SOURCES_DIR", data_dir / "sources"),
+                patch.object(config, "DOWNLOADED_DIR", data_dir / "downloaded"),
                 patch.object(config, "REVIEW_DIR", data_dir / "review"),
-                patch.object(config, "CURATED_DIR", data_dir / "curated"),
-                patch.object(config, "DERIVED_DIR", data_dir / "derived"),
                 patch.object(config, "SELECTED_DIR", data_dir / "selected"),
                 patch.object(config, "ARCHIVE_DIR", state_dir / "archives"),
-                patch.object(config, "LOG_DIR", state_dir / "logs"),
-                patch.object(config, "CURATION_LOG_PATH", state_dir / "curation_log.json"),
                 patch.object(config, "LARP_STYLES_DIR", config_dir / "larp" / "styles"),
             ):
                 config.ensure_config()
 
-            self.assertTrue((data_dir / "sources").is_dir())
+            self.assertTrue((data_dir / "downloaded").is_dir())
             self.assertTrue((data_dir / "review").is_dir())
-            self.assertTrue((data_dir / "curated").is_dir())
-            self.assertTrue((data_dir / "derived").is_dir())
             self.assertTrue((data_dir / "selected").is_dir())
             self.assertTrue((state_dir / "archives").is_dir())
-            self.assertTrue((state_dir / "logs").is_dir())
             self.assertTrue((config_dir / "larp" / "styles").is_dir())
-            self.assertTrue((config_dir / "instagram" / "accounts.txt").exists())
-            self.assertTrue((config_dir / "youtube" / "accounts.txt").exists())
-            self.assertTrue((config_dir / "tiktok" / "accounts.txt").exists())
-            self.assertTrue((config_dir / "urls.txt").exists())
-            self.assertFalse((config_dir / "youtube" / "hashtags.txt").exists())
+            inputs = json.loads((config_dir / "inputs.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                inputs,
+                {"instagram": [], "youtube": [], "tiktok": [], "urls": []},
+            )
 
 
 class LoadEnvFileTests(unittest.TestCase):
@@ -156,61 +150,43 @@ class LoadEnvFileTests(unittest.TestCase):
                 config.load_env_file()  # must not raise
 
 
-class RemoveLineTests(unittest.TestCase):
-    def test_removes_matching_line_and_leaves_others_untouched(self) -> None:
+class InputsConfigTests(unittest.TestCase):
+    def test_read_inputs_fills_missing_keys_and_normalizes_account_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "accounts.txt"
-            path.write_text("# comment\nnasa\nnatgeo\n", encoding="utf-8")
+            config_dir = Path(tmpdir)
+            (config_dir / "inputs.json").write_text(
+                json.dumps({"instagram": ["@NASA", "nasa"]}), encoding="utf-8"
+            )
 
-            self.assertTrue(config.remove_line(path, "nasa"))
-            self.assertEqual(path.read_text(encoding="utf-8"), "# comment\nnatgeo\n")
+            with patch.object(config, "CONFIG_DIR", config_dir):
+                inputs = config.read_inputs()
 
-    def test_missing_value_is_a_noop(self) -> None:
+            self.assertEqual(inputs["instagram"], ["nasa"])
+            self.assertEqual(inputs["youtube"], [])
+            self.assertEqual(inputs["tiktok"], [])
+            self.assertEqual(inputs["urls"], [])
+
+    def test_rejects_unknown_keys_and_non_string_arrays(self) -> None:
+        for payload in ({"unknown": []}, {"instagram": [123]}):
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as tmpdir:
+                config_dir = Path(tmpdir)
+                (config_dir / "inputs.json").write_text(json.dumps(payload), encoding="utf-8")
+                with patch.object(config, "CONFIG_DIR", config_dir):
+                    with self.assertRaises(SystemExit):
+                        config.read_inputs()
+
+    def test_add_and_remove_preserve_other_input_lists(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "accounts.txt"
-            path.write_text("nasa\n", encoding="utf-8")
+            config_dir = Path(tmpdir)
+            with patch.object(config, "CONFIG_DIR", config_dir):
+                config.add_input("instagram", "nasa")
+                config.add_input("urls", "https://example.com/post")
+                self.assertTrue(config.remove_input("instagram", "nasa"))
+                self.assertFalse(config.remove_input("instagram", "missing"))
+                inputs = config.read_inputs()
 
-            self.assertFalse(config.remove_line(path, "natgeo"))
-            self.assertEqual(path.read_text(encoding="utf-8"), "nasa\n")
-
-    def test_missing_file_is_a_noop(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "missing.txt"
-            self.assertFalse(config.remove_line(path, "nasa"))
-
-    def test_exact_match_is_case_sensitive_by_default(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "accounts.txt"
-            path.write_text("NASA\n", encoding="utf-8")
-
-            self.assertFalse(config.remove_line(path, "nasa"))
-            self.assertEqual(path.read_text(encoding="utf-8"), "NASA\n")
-
-    def test_case_insensitive_removes_a_differently_cased_line(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "accounts.txt"
-            path.write_text("NASA\nnatgeo\n", encoding="utf-8")
-
-            self.assertTrue(config.remove_line(path, "nasa", case_insensitive=True))
-            self.assertEqual(path.read_text(encoding="utf-8"), "natgeo\n")
-
-
-class AppendLineCaseInsensitiveTests(unittest.TestCase):
-    def test_exact_match_is_case_sensitive_by_default(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "accounts.txt"
-            path.write_text("NASA\n", encoding="utf-8")
-
-            self.assertTrue(config.append_line(path, "nasa"))
-            self.assertEqual(path.read_text(encoding="utf-8"), "NASA\nnasa\n")
-
-    def test_case_insensitive_skips_a_differently_cased_duplicate(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "accounts.txt"
-            path.write_text("NASA\n", encoding="utf-8")
-
-            self.assertFalse(config.append_line(path, "nasa", case_insensitive=True))
-            self.assertEqual(path.read_text(encoding="utf-8"), "NASA\n")
+            self.assertEqual(inputs["instagram"], [])
+            self.assertEqual(inputs["urls"], ["https://example.com/post"])
 
 
 if __name__ == "__main__":

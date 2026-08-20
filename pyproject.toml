@@ -21,6 +21,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/yunoballizer"]
-
-[tool.hatch.build]
-include = ["src/yunoballizer/templates/**/*.txt"]

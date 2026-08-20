@@ -51,9 +51,25 @@ def build_parser() -> argparse.ArgumentParser:
              "Must start with '@' for an account, e.g. '@nasa' (hashtag support may come later)",
     )
 
-    sub.add_parser(
+    fetch_parser = sub.add_parser(
         "fetch",
-        help="Requires an active session (see `auth login`). Adds saved-post authors to Instagram accounts.txt",
+        help="Requires an active session (see `auth login`). Adds accounts from Instagram to accounts.txt",
+    )
+    fetch_parser.add_argument(
+        "-l", "--limit", type=int, default=None,
+        help="Max items to read per selected source (default: no limit)",
+    )
+    fetch_parser.add_argument(
+        "--sync", action="store_true",
+        help="Make accounts.txt match exactly what's found this run -- removes any account not "
+             "in the selected source(s), not just adds new ones",
+    )
+    fetch_parser.add_argument(
+        "--source", nargs="+", default=["saved"], metavar="SOURCE",
+        help=f"Where to pull accounts from (default: saved). Multiple allowed, e.g. "
+             f"'--source saved following'. Supported: {', '.join(fetch.SOURCES)}. "
+             f"NOT available -- no Instagram API exposes them, official or not -- "
+             f"{', '.join(fetch._UNSUPPORTED_SOURCES)}",
     )
 
     auth_parser = sub.add_parser("auth", help="Manage saved Instagram login sessions used by fetch")
@@ -310,7 +326,7 @@ def main(argv: list[str] | None = None) -> None:
     config.load_env_file()
 
     if args.command == "fetch":
-        fetch.run()
+        fetch.run(limit=args.limit, sync=args.sync, sources=args.source)
     elif args.command == "auth":
         if args.auth_command == "login":
             auth.login(browser=args.browser, assume_yes=args.yes)

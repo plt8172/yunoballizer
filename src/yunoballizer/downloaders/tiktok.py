@@ -6,6 +6,8 @@ import logging
 import time
 from datetime import date
 
+import yt_dlp
+
 from .. import config, storage
 from .budget import TotalBudget
 from .ytdlp_helper import download
@@ -40,10 +42,11 @@ def harvest(
     archive = config.ARCHIVE_DIR / "tiktok.txt"
 
     date_opts = {}
-    if since is not None:
-        date_opts["dateafter"] = since.strftime("%Y%m%d")
-    if until is not None:
-        date_opts["datebefore"] = until.strftime("%Y%m%d")
+    if since is not None or until is not None:
+        date_opts["daterange"] = yt_dlp.utils.DateRange(
+            start=since.strftime("%Y%m%d") if since is not None else None,
+            end=until.strftime("%Y%m%d") if until is not None else None,
+        )
 
     for account in accounts:
         if budget is not None and budget.exhausted:

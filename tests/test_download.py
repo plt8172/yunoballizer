@@ -647,8 +647,9 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
             )
 
         extra_opts = download.call_args.args[3]
-        self.assertEqual(extra_opts["dateafter"], "20260101")
-        self.assertEqual(extra_opts["datebefore"], "20260630")
+        daterange = extra_opts["daterange"]
+        self.assertEqual(daterange.start, datetime.date(2026, 1, 1))
+        self.assertEqual(daterange.end, datetime.date(2026, 6, 30))
 
     def test_youtube_skips_entirely_for_type_photo(self) -> None:
         with patch.object(youtube, "download") as download:

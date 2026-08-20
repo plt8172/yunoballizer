@@ -6,12 +6,13 @@ import logging
 
 from .. import config, storage
 from . import instagram
+from .budget import TotalBudget
 from .ytdlp_helper import download
 
 logger = logging.getLogger("yunoballizer.urls")
 
 
-def download_urls(urls: list[str], progress: storage.ReviewProgress | None = None) -> None:
+def download_urls(urls: list[str], progress: storage.ReviewProgress | None = None, budget: TotalBudget | None = None) -> None:
     """Download a batch of non-Instagram URLs via yt-dlp.
 
     Shares urls.txt's destination dir, archive file (dedup), and per-item
@@ -22,11 +23,25 @@ def download_urls(urls: list[str], progress: storage.ReviewProgress | None = Non
         return
     progress = progress if progress is not None else storage.ReviewProgress()
 
+    # Apply total budget if provided.
+    urls_to_download = urls
+    if budget is not None:
+        if budget.exhausted:
+            logger.info("Total download limit reached; skipping URL batch.")
+            return
+        limit = budget.take(len(urls))
+        if limit <= 0:
+            logger.info("Total download limit reached; skipping URL batch.")
+            return
+        urls_to_download = urls[:limit]
+        if len(urls_to_download) < len(urls):
+            logger.info("URL batch limited by --total-limit: downloading %d of %d URLs", len(urls_to_download), len(urls))
+
     out_dir = config.SOURCES_DIR / "other"
     archive = config.ARCHIVE_DIR / "other.txt"
-    logger.info("Processing %d URL(s)...", len(urls))
+    logger.info("Processing %d URL(s)...", len(urls_to_download))
     download(
-        urls,
+        urls_to_download,
         str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "video.%(ext)s"),
         archive,
         metadata_template=str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "metadata.%(ext)s"),
@@ -37,7 +52,7 @@ def download_urls(urls: list[str], progress: storage.ReviewProgress | None = Non
     storage.organize_ytdlp_tree(out_dir)
 
 
-def harvest(progress: storage.ReviewProgress | None = None) -> None:
+def harvest(progress: storage.ReviewProgress | None = None, budget: TotalBudget | None = None) -> None:
     urls_file = config.CONFIG_DIR / "urls.txt"
     all_urls = config.read_lines(urls_file)
     if not all_urls:
@@ -57,4 +72,4 @@ def harvest(progress: storage.ReviewProgress | None = None) -> None:
         logger.info("Processing %d Instagram URL(s)...", len(instagram_urls))
         instagram.harvest_urls(instagram_urls, progress=progress)
 
-    download_urls(other_urls, progress=progress)
+    download_urls(other_urls, progress=progress, budget=budget)

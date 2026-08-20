@@ -132,7 +132,7 @@ def _run_download(
     if "tiktok" in selected:
         tiktok.harvest(limit=limit, skip=skip, accounts=accounts, **extra)
     if accounts is None and platforms is None:
-        urls_mod.harvest(progress=progress)
+        urls_mod.harvest(progress=progress, budget=budget)
     logger.info("New items added to review/: %d", progress.total)
 
 

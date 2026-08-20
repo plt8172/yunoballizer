@@ -54,7 +54,7 @@ Fill in the account list files:
 | `instagram/accounts.txt` | Instagram accounts to crawl | Not required |
 | `youtube/accounts.txt` | YouTube accounts' Shorts tab | Not required |
 | `tiktok/accounts.txt` | TikTok accounts (hashtags not supported) | Not required |
-| `urls.txt` | Individual TikTok/YouTube URLs to download | Not required |
+| `urls.txt` | Individual TikTok/YouTube/Instagram URLs to download | Not required |
 
 ## Usage
 
@@ -79,8 +79,16 @@ yuno fetch                # Uses the active saved session. Adds saved-post autho
 
 yuno download            # No login required. Crawls accounts.txt + urls.txt (Instagram/YouTube/TikTok)
 yuno download @nasa      # Harvest a single account across all three platforms instead of the configured lists
+yuno download https://www.instagram.com/p/ABC123/   # Download a single post/video URL, same as adding it to urls.txt
 yuno download -l 5       # Cap harvest at 5 posts per account (default: 20)
 yuno download -s 5 -l 10 # Skip the newest 5 posts, then harvest the next 10 per account
+
+yuno download -p instagram              # Only harvest Instagram (repeat -p for more than one platform)
+yuno download --since 2026-01-01        # Only posts published on/after this date
+yuno download --until 2026-06-30        # Only posts published on/before this date
+yuno download -t photo                  # Only photos (YouTube Shorts/TikTok are always video, so this skips them)
+yuno download --total-limit 50          # Cap posts requested across every account/platform combined
+yuno download --delay 5                 # Seconds to wait between accounts (overrides each platform's own default)
 
 yuno select                # Browse review/ one item at a time: s to select, c to save a larp template, o to open natively
 yuno export                # Copy/hardlink everything you've selected into selected/
@@ -96,6 +104,13 @@ yuno larp --style casual  # Generate comment/caption text from a saved style's t
 
 `-s`/`--skip` and `-l`/`--limit` mean the same thing across all three
 platforms: skip the N most recent posts per account, then harvest the next L.
+
+`review/` is updated incrementally as `download` runs, not just once at the
+very end: each post lands there as soon as it (or, for Instagram, its whole
+account) finishes downloading. So interrupting a long `download` run --
+Ctrl-C, a dropped connection, a rate limit -- doesn't lose visibility into
+what already finished; `yuno select` can browse it right away instead of
+waiting for the entire run to complete.
 
 ### `yuno larp`: comment/caption text generation
 
@@ -425,6 +440,10 @@ pip uninstall yunoballizer
 
 ## Notes
 
+- Instagram links in `urls.txt` (`/p/`, `/reel/`, `/tv/`) are downloaded via
+  Instaloader, not yt-dlp -- yt-dlp's Instagram extractor can't download
+  photo posts at all and has been unreliable for video. Everything else in
+  `urls.txt` still goes through yt-dlp as before.
 - TikTok hashtag/trending discovery isn't supported at all right now -- the
   yt-dlp extractor for it is broken upstream, independent of login.
 - Even anonymous harvesting can trigger a temporary IP-level block if run

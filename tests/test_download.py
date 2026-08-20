@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import datetime
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
-from yunoballizer import cli, storage
-from yunoballizer.downloaders import instagram, tiktok, youtube, ytdlp_helper
+from yunoballizer import cli, config, storage
+from yunoballizer import download as download_cmd
+from yunoballizer.downloaders import instagram, tiktok, urls, youtube, ytdlp_helper
+from yunoballizer.downloaders.budget import TotalBudget
 
 
 class _FakeProfile:
@@ -50,6 +53,50 @@ class YtdlpHelperTests(unittest.TestCase):
         self.assertFalse(options["allow_playlist_files"])
         ydl.download.assert_called_once_with(["https://example.test/post"])
 
+    def test_on_item_done_fires_once_per_finished_file_with_its_post_dir(self) -> None:
+        ydl = Mock()
+        ydl.__enter__ = Mock(return_value=ydl)
+        ydl.__exit__ = Mock(return_value=False)
+        on_item_done = Mock()
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(ytdlp_helper.yt_dlp, "YoutubeDL", return_value=ydl) as youtube_dl,
+        ):
+            root = Path(tmpdir)
+            ytdlp_helper.download(
+                "https://example.test/post",
+                str(root / "%(id)s" / "video.%(ext)s"),
+                root / "state" / "archive.txt",
+                on_item_done=on_item_done,
+            )
+
+        hook = youtube_dl.call_args.args[0]["progress_hooks"][0]
+        post_dir = root / "vid1"
+
+        hook({"status": "downloading", "filename": str(post_dir / "video.mp4")})
+        on_item_done.assert_not_called()
+
+        hook({"status": "finished", "filename": str(post_dir / "video.mp4")})
+        on_item_done.assert_called_once_with(post_dir)
+
+    def test_no_progress_hooks_option_when_on_item_done_omitted(self) -> None:
+        ydl = Mock()
+        ydl.__enter__ = Mock(return_value=ydl)
+        ydl.__exit__ = Mock(return_value=False)
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(ytdlp_helper.yt_dlp, "YoutubeDL", return_value=ydl) as youtube_dl,
+        ):
+            ytdlp_helper.download(
+                "https://example.test/post",
+                str(Path(tmpdir) / "video.%(ext)s"),
+                Path(tmpdir) / "state" / "archive.txt",
+            )
+
+        self.assertNotIn("progress_hooks", youtube_dl.call_args.args[0])
+
 
 class CliParserTests(unittest.TestCase):
     def test_parser_accepts_skip_short_and_long_flags(self) -> None:
@@ -61,15 +108,200 @@ class CliParserTests(unittest.TestCase):
 
     def test_run_download_forwards_skip_to_account_downloaders(self) -> None:
         with (
-            patch.object(cli.instagram, "harvest") as instagram_harvest,
-            patch.object(cli.youtube, "harvest") as youtube_harvest,
-            patch.object(cli.tiktok, "harvest") as tiktok_harvest,
-            patch.object(cli.storage, "refresh_review", return_value=0),
+            patch.object(download_cmd.instagram, "harvest") as instagram_harvest,
+            patch.object(download_cmd.youtube, "harvest") as youtube_harvest,
+            patch.object(download_cmd.tiktok, "harvest") as tiktok_harvest,
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
         ):
-            cli._run_download(limit=10, skip=5, accounts=["nasa"])
+            download_cmd._run_download(limit=10, skip=5, accounts=["nasa"])
 
         for harvest in (instagram_harvest, youtube_harvest, tiktok_harvest):
-            harvest.assert_called_once_with(limit=10, skip=5, accounts=["nasa"])
+            harvest.assert_called_once_with(limit=10, skip=5, accounts=["nasa"], progress=ANY)
+
+    def test_parser_accepts_new_download_flags(self) -> None:
+        args = cli.build_parser().parse_args([
+            "download",
+            "-p", "instagram", "-p", "tiktok",
+            "--since", "2026-01-01",
+            "--until", "2026-06-30",
+            "-t", "photo",
+            "--total-limit", "50",
+            "--delay", "5",
+        ])
+
+        self.assertEqual(args.platforms, ["instagram", "tiktok"])
+        self.assertEqual(args.since, datetime.date(2026, 1, 1))
+        self.assertEqual(args.until, datetime.date(2026, 6, 30))
+        self.assertEqual(args.media_type, "photo")
+        self.assertEqual(args.total_limit, 50)
+        self.assertEqual(args.delay, 5)
+
+    def test_parser_rejects_invalid_date(self) -> None:
+        with self.assertRaises(SystemExit):
+            cli.build_parser().parse_args(["download", "--since", "01-01-2026"])
+
+    def test_main_rejects_since_after_until(self) -> None:
+        with self.assertRaises(SystemExit):
+            cli.main(["download", "--since", "2026-06-30", "--until", "2026-01-01"])
+
+    def test_run_download_restricts_to_selected_platforms(self) -> None:
+        with (
+            patch.object(download_cmd.instagram, "harvest") as instagram_harvest,
+            patch.object(download_cmd.youtube, "harvest") as youtube_harvest,
+            patch.object(download_cmd.tiktok, "harvest") as tiktok_harvest,
+            patch.object(download_cmd.urls_mod, "harvest") as urls_harvest,
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
+        ):
+            download_cmd._run_download(platforms=["instagram"])
+
+        instagram_harvest.assert_called_once_with(limit=20, skip=0, accounts=None, progress=ANY)
+        youtube_harvest.assert_not_called()
+        tiktok_harvest.assert_not_called()
+        # urls.txt isn't tied to one platform, so a -p filter skips it too.
+        urls_harvest.assert_not_called()
+
+    def test_run_download_forwards_since_until_type_and_delay(self) -> None:
+        since = datetime.date(2026, 1, 1)
+        until = datetime.date(2026, 6, 30)
+        with (
+            patch.object(download_cmd.instagram, "harvest") as instagram_harvest,
+            patch.object(download_cmd.youtube, "harvest") as youtube_harvest,
+            patch.object(download_cmd.tiktok, "harvest") as tiktok_harvest,
+            patch.object(download_cmd.urls_mod, "harvest"),
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
+        ):
+            download_cmd._run_download(since=since, until=until, media_type="video", delay=5)
+
+        for harvest in (instagram_harvest, youtube_harvest, tiktok_harvest):
+            harvest.assert_called_once_with(
+                limit=20, skip=0, accounts=None,
+                since=since, until=until, media_type="video", sleep_seconds=5, progress=ANY,
+            )
+
+    def test_run_download_shares_one_budget_across_platforms(self) -> None:
+        with (
+            patch.object(download_cmd.instagram, "harvest") as instagram_harvest,
+            patch.object(download_cmd.youtube, "harvest") as youtube_harvest,
+            patch.object(download_cmd.tiktok, "harvest") as tiktok_harvest,
+            patch.object(download_cmd.urls_mod, "harvest"),
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
+        ):
+            download_cmd._run_download(total_limit=30)
+
+        budgets = {
+            call.kwargs["budget"]
+            for call in (
+                instagram_harvest.call_args, youtube_harvest.call_args, tiktok_harvest.call_args,
+            )
+        }
+        self.assertEqual(len(budgets), 1)
+        self.assertIsInstance(budgets.pop(), TotalBudget)
+
+
+class DownloadTargetRoutingTests(unittest.TestCase):
+    def test_is_url_recognizes_http_and_https_only(self) -> None:
+        self.assertTrue(download_cmd._is_url("https://www.tiktok.com/@nasa/video/1"))
+        self.assertTrue(download_cmd._is_url("http://example.test/post"))
+        self.assertFalse(download_cmd._is_url("@nasa"))
+        self.assertFalse(download_cmd._is_url("nasa"))
+
+    def test_run_dispatches_a_url_target_to_run_target_url(self) -> None:
+        args = cli.build_parser().parse_args(["download", "https://www.tiktok.com/@nasa/video/1"])
+        with patch.object(download_cmd, "_run_target_url") as run_target_url:
+            download_cmd.run(args)
+
+        run_target_url.assert_called_once_with("https://www.tiktok.com/@nasa/video/1")
+
+    def test_run_dispatches_an_account_target_to_run_download(self) -> None:
+        args = cli.build_parser().parse_args(["download", "@nasa"])
+        with patch.object(download_cmd, "_run_download") as run_download:
+            download_cmd.run(args)
+
+        run_download.assert_called_once_with(
+            limit=20, skip=0, accounts=["nasa"], platforms=None,
+            since=None, until=None, media_type=None, total_limit=None, delay=None,
+        )
+
+    def test_run_rejects_target_that_is_neither_account_nor_url(self) -> None:
+        args = cli.build_parser().parse_args(["download", "nasa"])
+        with self.assertRaises(SystemExit):
+            download_cmd.run(args)
+
+    def test_run_target_url_routes_instagram_url_through_instaloader(self) -> None:
+        with (
+            patch.object(download_cmd.instagram, "harvest_urls") as harvest_urls,
+            patch.object(download_cmd.urls_mod, "download_urls") as download_urls,
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
+        ):
+            download_cmd._run_target_url("https://www.instagram.com/p/ABC123/")
+
+        harvest_urls.assert_called_once_with(["https://www.instagram.com/p/ABC123/"], progress=ANY)
+        download_urls.assert_not_called()
+
+    def test_run_target_url_routes_other_url_through_yt_dlp(self) -> None:
+        with (
+            patch.object(download_cmd.instagram, "harvest_urls") as harvest_urls,
+            patch.object(download_cmd.urls_mod, "download_urls") as download_urls,
+            patch.object(download_cmd.storage, "refresh_review", return_value=0),
+        ):
+            download_cmd._run_target_url("https://www.tiktok.com/@nasa/video/1")
+
+        download_urls.assert_called_once_with(["https://www.tiktok.com/@nasa/video/1"], progress=ANY)
+        harvest_urls.assert_not_called()
+
+    def test_run_download_reports_true_total_despite_incremental_refreshes(self) -> None:
+        # Regression test for the exact bug this fixes: instagram/youtube
+        # harvest() each refresh review/ incrementally as they go, so a naive
+        # single trailing refresh_review() call at the end of _run_download
+        # always sees 0 left to add. The logged total must instead come from
+        # the shared ReviewProgress each harvest() call adds to.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir) / "sources"
+            review_dir = Path(tmpdir) / "review"
+            (sources_dir / "instagram" / "nasa" / "post1").mkdir(parents=True)
+            (sources_dir / "instagram" / "nasa" / "post1" / "image.jpg").touch()
+            (sources_dir / "youtube" / "creator" / "vid1").mkdir(parents=True)
+            (sources_dir / "youtube" / "creator" / "vid1" / "video.mp4").touch()
+
+            def fake_instagram_harvest(*, progress, **kwargs):
+                progress.refresh()  # simulates the per-account incremental refresh
+
+            def fake_youtube_harvest(*, progress, **kwargs):
+                progress.refresh()  # simulates the per-post incremental refresh
+
+            with (
+                patch.object(config, "SOURCES_DIR", sources_dir),
+                patch.object(config, "REVIEW_DIR", review_dir),
+                patch.object(download_cmd.instagram, "harvest", side_effect=fake_instagram_harvest),
+                patch.object(download_cmd.youtube, "harvest", side_effect=fake_youtube_harvest),
+                patch.object(download_cmd.tiktok, "harvest"),
+                patch.object(download_cmd.urls_mod, "harvest"),
+                self.assertLogs(download_cmd.logger, level="INFO") as logs,
+            ):
+                download_cmd._run_download()
+
+        self.assertIn("New items added to review/: 2", logs.output[-1])
+
+
+class TotalBudgetTests(unittest.TestCase):
+    def test_unlimited_when_no_limit_given(self) -> None:
+        budget = TotalBudget(None)
+        self.assertFalse(budget.exhausted)
+        self.assertEqual(budget.take(20), 20)
+        self.assertFalse(budget.exhausted)
+
+    def test_caps_and_spends_across_calls(self) -> None:
+        budget = TotalBudget(15)
+        self.assertEqual(budget.take(20), 15)
+        self.assertTrue(budget.exhausted)
+        self.assertEqual(budget.take(5), 0)
+
+    def test_splits_across_several_accounts(self) -> None:
+        budget = TotalBudget(25)
+        self.assertEqual(budget.take(20), 20)
+        self.assertFalse(budget.exhausted)
+        self.assertEqual(budget.take(20), 5)
+        self.assertTrue(budget.exhausted)
 
 
 class InstagramDownloadTests(unittest.TestCase):
@@ -170,6 +402,97 @@ class InstagramDownloadTests(unittest.TestCase):
 
         organize.assert_called_once_with(Path(tmpdir) / "instagram" / "nasa")
 
+    def test_refresh_review_runs_after_each_account_not_just_at_the_end(self) -> None:
+        # So an interrupted multi-account run still leaves already-finished
+        # accounts' posts visible in review/, instead of only after the
+        # whole run (across every platform) completes.
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(instagram.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(
+                instagram.instaloader, "Instaloader",
+                return_value=SimpleNamespace(context=object(), download_profiles=Mock(), compress_json=True),
+            ),
+            patch.object(
+                instagram.instaloader.Profile, "from_username",
+                side_effect=[_FakeProfile("a"), _FakeProfile("b")],
+            ),
+            patch.object(instagram.time, "sleep"),
+            patch.object(instagram.storage, "organize_instagram_account"),
+            patch.object(instagram.storage, "refresh_review") as refresh_review,
+        ):
+            instagram.harvest(accounts=["a", "b"], sleep_seconds=0)
+
+        self.assertEqual(refresh_review.call_count, 2)
+
+    def test_post_filter_honors_since_until_and_media_type(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(instagram.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(
+                instagram.instaloader, "Instaloader",
+                return_value=SimpleNamespace(context=object(), download_profiles=Mock(), compress_json=True),
+            ),
+            patch.object(
+                instagram.instaloader.Profile, "from_username",
+                return_value=_FakeProfile("nasa"),
+            ),
+            patch.object(instagram.time, "sleep"),
+            patch.object(instagram.storage, "organize_instagram_account"),
+        ):
+            instagram.harvest(
+                accounts=["nasa"], sleep_seconds=0,
+                since=datetime.date(2026, 1, 1), until=datetime.date(2026, 6, 30),
+                media_type="photo",
+            )
+
+            loader = instagram.instaloader.Instaloader.return_value
+            post_filter = loader.download_profiles.call_args.kwargs["post_filter"]
+
+            too_early = SimpleNamespace(
+                shortcode="early", mediacount=1, is_video=False,
+                date_utc=datetime.datetime(2025, 12, 31),
+            )
+            too_late = SimpleNamespace(
+                shortcode="late", mediacount=1, is_video=False,
+                date_utc=datetime.datetime(2026, 7, 1),
+            )
+            a_video = SimpleNamespace(
+                shortcode="vid", mediacount=1, is_video=True,
+                date_utc=datetime.datetime(2026, 3, 1),
+            )
+            a_photo = SimpleNamespace(
+                shortcode="pic", mediacount=1, is_video=False,
+                date_utc=datetime.datetime(2026, 3, 1),
+            )
+            self.assertFalse(post_filter(too_early))
+            self.assertFalse(post_filter(too_late))
+            self.assertFalse(post_filter(a_video))
+            self.assertTrue(post_filter(a_photo))
+
+    def test_budget_caps_max_count_and_stops_once_exhausted(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(instagram.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(
+                instagram.instaloader, "Instaloader",
+                return_value=SimpleNamespace(context=object(), download_profiles=Mock(), compress_json=True),
+            ),
+            patch.object(
+                instagram.instaloader.Profile, "from_username",
+                return_value=_FakeProfile("nasa"),
+            ),
+            patch.object(instagram.time, "sleep"),
+            patch.object(instagram.storage, "organize_instagram_account"),
+        ):
+            budget = TotalBudget(3)
+            instagram.harvest(accounts=["a", "b"], limit=20, sleep_seconds=0, budget=budget)
+
+            loader = instagram.instaloader.Instaloader.return_value
+            self.assertEqual(loader.download_profiles.call_count, 1)
+            self.assertEqual(loader.download_profiles.call_args.kwargs["max_count"], 3)
+            self.assertTrue(budget.exhausted)
+
     def test_removes_stray_profile_level_metadata_json_after_harvest(self) -> None:
         # Instaloader.download_profiles() unconditionally drops a
         # "<username>_<userid>.json[.xz]" profile-level metadata file in the
@@ -208,6 +531,74 @@ class InstagramDownloadTests(unittest.TestCase):
                     self.assertFalse(stray.exists())
 
 
+class InstagramUrlDownloadTests(unittest.TestCase):
+    def test_is_instagram_url_matches_post_reel_and_tv_links(self) -> None:
+        for url in (
+            "https://www.instagram.com/p/ABC123xyz/",
+            "https://instagram.com/reel/ABC123xyz",
+            "https://www.instagram.com/tv/ABC123xyz/?hl=en",
+        ):
+            with self.subTest(url=url):
+                self.assertTrue(instagram.is_instagram_url(url))
+
+    def test_is_instagram_url_rejects_other_platforms(self) -> None:
+        for url in (
+            "https://www.tiktok.com/@nasa/video/1234",
+            "https://www.youtube.com/shorts/abc123",
+            "https://www.instagram.com/nasa/",  # a profile, not a post
+        ):
+            with self.subTest(url=url):
+                self.assertFalse(instagram.is_instagram_url(url))
+
+    def test_harvest_urls_downloads_post_by_shortcode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir)
+            post = SimpleNamespace(owner_username="nasa", shortcode="ABC123", mediacount=1)
+            loader = SimpleNamespace(context=object(), download_post=Mock())
+
+            with (
+                patch.object(instagram.config, "SOURCES_DIR", sources_dir),
+                patch.object(instagram, "_new_loader", return_value=loader),
+                patch.object(instagram.instaloader.Post, "from_shortcode", return_value=post),
+                patch.object(instagram.storage, "organize_instagram_account") as organize,
+                patch.object(instagram.storage, "refresh_review") as refresh_review,
+            ):
+                instagram.harvest_urls(["https://www.instagram.com/p/ABC123/"])
+
+            loader.download_post.assert_called_once_with(post, target="nasa")
+            organize.assert_called_once_with(sources_dir / "instagram" / "nasa")
+            refresh_review.assert_called_once()
+
+    def test_harvest_urls_skips_a_post_already_fully_downloaded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_dir = Path(tmpdir)
+            post_dir = sources_dir / "instagram" / "nasa" / "ABC123"
+            (post_dir / "image.jpg").parent.mkdir(parents=True)
+            (post_dir / "image.jpg").touch()
+            post = SimpleNamespace(owner_username="nasa", shortcode="ABC123", mediacount=1)
+            loader = SimpleNamespace(context=object(), download_post=Mock())
+
+            with (
+                patch.object(instagram.config, "SOURCES_DIR", sources_dir),
+                patch.object(instagram, "_new_loader", return_value=loader),
+                patch.object(instagram.instaloader.Post, "from_shortcode", return_value=post),
+            ):
+                instagram.harvest_urls(["https://www.instagram.com/p/ABC123/"])
+
+            loader.download_post.assert_not_called()
+
+    def test_harvest_urls_logs_and_continues_on_unparseable_url(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(instagram.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(instagram, "_new_loader"),
+            patch.object(instagram.instaloader.Post, "from_shortcode") as from_shortcode,
+        ):
+            instagram.harvest_urls(["https://example.test/not-instagram"])
+
+        from_shortcode.assert_not_called()
+
+
 class YoutubeTiktokDownloadTests(unittest.TestCase):
     def test_youtube_uses_one_based_skip_range_and_id_scoped_templates(self) -> None:
         with (
@@ -241,6 +632,182 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
         self.assertIn("/%(id)s/metadata.%(ext)s", download.call_args.kwargs["metadata_template"])
         self.assertIn("/%(id)s/caption.%(ext)s", download.call_args.kwargs["caption_template"])
         organize.assert_called_once_with(Path(tmpdir) / "tiktok")
+
+    def test_youtube_forwards_since_until_as_yt_dlp_date_opts(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(youtube.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(youtube.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(youtube, "download") as download,
+            patch.object(youtube.storage, "organize_ytdlp_tree"),
+        ):
+            youtube.harvest(
+                accounts=["@nasa"],
+                since=datetime.date(2026, 1, 1), until=datetime.date(2026, 6, 30),
+            )
+
+        extra_opts = download.call_args.args[3]
+        daterange = extra_opts["daterange"]
+        self.assertEqual(daterange.start, datetime.date(2026, 1, 1))
+        self.assertEqual(daterange.end, datetime.date(2026, 6, 30))
+
+    def test_youtube_skips_entirely_for_type_photo(self) -> None:
+        with patch.object(youtube, "download") as download:
+            youtube.harvest(accounts=["@nasa"], media_type="photo")
+
+        download.assert_not_called()
+
+    def test_tiktok_skips_entirely_for_type_photo(self) -> None:
+        with patch.object(tiktok, "download") as download:
+            tiktok.harvest(accounts=["nasa"], media_type="photo")
+
+        download.assert_not_called()
+
+    def test_youtube_wires_up_incremental_review_refresh(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(youtube.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(youtube.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(youtube, "download") as download,
+            patch.object(youtube.storage, "organize_ytdlp_tree"),
+        ):
+            progress = storage.ReviewProgress()
+            youtube.harvest(accounts=["@nasa"], progress=progress)
+
+        on_item_done = download.call_args.kwargs["on_item_done"]
+        self.assertEqual(on_item_done.func, youtube.storage.refresh_new_ytdlp_post)
+        self.assertIs(on_item_done.keywords["progress"], progress)
+
+    def test_tiktok_wires_up_incremental_review_refresh(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(tiktok.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(tiktok.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(tiktok, "download") as download,
+            patch.object(tiktok.storage, "organize_ytdlp_tree"),
+            patch.object(tiktok.time, "sleep"),
+        ):
+            progress = storage.ReviewProgress()
+            tiktok.harvest(accounts=["nasa"], progress=progress)
+
+        on_item_done = download.call_args.kwargs["on_item_done"]
+        self.assertEqual(on_item_done.func, tiktok.storage.refresh_new_ytdlp_post)
+        self.assertIs(on_item_done.keywords["progress"], progress)
+
+    def test_urls_wires_up_incremental_review_refresh(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
+            patch.object(urls.config, "SOURCES_DIR", Path(tmpdir) / "sources"),
+            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(urls, "download") as download,
+            patch.object(urls.storage, "organize_ytdlp_tree"),
+        ):
+            (Path(tmpdir) / "urls.txt").write_text("https://example.test/post\n")
+            progress = storage.ReviewProgress()
+            urls.harvest(progress=progress)
+
+        on_item_done = download.call_args.kwargs["on_item_done"]
+        self.assertEqual(on_item_done.func, urls.storage.refresh_new_ytdlp_post)
+        self.assertIs(on_item_done.keywords["progress"], progress)
+
+    def test_tiktok_budget_caps_playlistend_and_stops_once_exhausted(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(tiktok.config, "SOURCES_DIR", Path(tmpdir)),
+            patch.object(tiktok.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(tiktok, "download") as download,
+            patch.object(tiktok.storage, "organize_ytdlp_tree"),
+            patch.object(tiktok.time, "sleep"),
+        ):
+            budget = TotalBudget(3)
+            tiktok.harvest(accounts=["a", "b"], limit=20, budget=budget)
+
+        download.assert_called_once()
+        self.assertEqual(download.call_args.args[3]["playlistend"], 3)
+        self.assertTrue(budget.exhausted)
+
+
+class UrlsHarvestSplitTests(unittest.TestCase):
+    def test_routes_instagram_urls_to_instaloader_and_the_rest_to_yt_dlp(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
+            patch.object(urls.config, "SOURCES_DIR", Path(tmpdir) / "sources"),
+            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(urls, "download") as download,
+            patch.object(urls.storage, "organize_ytdlp_tree"),
+            patch.object(urls.instagram, "harvest_urls") as harvest_urls,
+        ):
+            (Path(tmpdir) / "urls.txt").write_text(
+                "https://www.instagram.com/p/ABC123/\n"
+                "https://www.tiktok.com/@nasa/video/1\n"
+            )
+            urls.harvest()
+
+        harvest_urls.assert_called_once_with(["https://www.instagram.com/p/ABC123/"], progress=ANY)
+        download.assert_called_once()
+        self.assertEqual(download.call_args.args[0], ["https://www.tiktok.com/@nasa/video/1"])
+
+    def test_skips_yt_dlp_entirely_when_every_url_is_instagram(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
+            patch.object(urls.config, "SOURCES_DIR", Path(tmpdir) / "sources"),
+            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(urls, "download") as download,
+            patch.object(urls.instagram, "harvest_urls") as harvest_urls,
+        ):
+            (Path(tmpdir) / "urls.txt").write_text("https://www.instagram.com/p/ABC123/\n")
+            urls.harvest()
+
+        harvest_urls.assert_called_once_with(["https://www.instagram.com/p/ABC123/"], progress=ANY)
+        download.assert_not_called()
+
+    def test_skips_instaloader_entirely_when_no_url_is_instagram(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
+            patch.object(urls.config, "SOURCES_DIR", Path(tmpdir) / "sources"),
+            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(urls, "download") as download,
+            patch.object(urls.storage, "organize_ytdlp_tree"),
+            patch.object(urls.instagram, "harvest_urls") as harvest_urls,
+        ):
+            (Path(tmpdir) / "urls.txt").write_text("https://www.tiktok.com/@nasa/video/1\n")
+            urls.harvest()
+
+        harvest_urls.assert_not_called()
+        download.assert_called_once()
+
+    def test_download_urls_is_a_noop_for_an_empty_list(self) -> None:
+        with (
+            patch.object(urls, "download") as download,
+            patch.object(urls.storage, "organize_ytdlp_tree") as organize,
+        ):
+            urls.download_urls([])
+
+        download.assert_not_called()
+        organize.assert_not_called()
+
+    def test_download_urls_shares_the_urls_txt_destination_and_archive(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(urls.config, "SOURCES_DIR", Path(tmpdir) / "sources"),
+            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
+            patch.object(urls, "download") as download,
+            patch.object(urls.storage, "organize_ytdlp_tree") as organize,
+        ):
+            progress = storage.ReviewProgress()
+            urls.download_urls(["https://www.tiktok.com/@nasa/video/1"], progress=progress)
+
+        download.assert_called_once()
+        self.assertEqual(download.call_args.args[0], ["https://www.tiktok.com/@nasa/video/1"])
+        self.assertEqual(download.call_args.args[2], Path(tmpdir) / "archives" / "other.txt")
+        on_item_done = download.call_args.kwargs["on_item_done"]
+        self.assertEqual(on_item_done.func, urls.storage.refresh_new_ytdlp_post)
+        self.assertIs(on_item_done.keywords["progress"], progress)
+        organize.assert_called_once_with(Path(tmpdir) / "sources" / "other")
 
 
 if __name__ == "__main__":

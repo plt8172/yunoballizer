@@ -5,10 +5,28 @@ download success/failure at the Python level instead of parsing log text.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import yt_dlp
+
+
+def _make_progress_hook(on_item_done: Callable[[Path], None]) -> Callable[[dict], None]:
+    def hook(d: dict) -> None:
+        if d.get("status") != "finished":
+            return
+        filename = d.get("filename") or d.get("info_dict", {}).get("filepath")
+        if not filename:
+            return
+        path = Path(filename)
+        # Skip temporary files from format merging (e.g., "video.f18.mp4", "audio.f140.m4a").
+        # These are intermediate files that get deleted/renamed by organize_ytdlp_tree.
+        if re.search(r"\.f\d+$", path.stem):
+            return
+        on_item_done(path.parent)
+
+    return hook
 
 
 def download(
@@ -18,6 +36,7 @@ def download(
     extra_opts: dict | None = None,
     metadata_template: str | None = None,
     caption_template: str | None = None,
+    on_item_done: Callable[[Path], None] | None = None,
 ) -> None:
     if isinstance(urls, str):
         urls = [urls]
@@ -42,6 +61,12 @@ def download(
     }
     if caption_template:
         opts["writedescription"] = True
+    if on_item_done is not None:
+        # Fires once per finished media file (not once per post overall for a
+        # multi-format merge), but with the single-format downloads used here
+        # that's the same thing -- lets review/ pick up each post as soon as
+        # it lands instead of only after the whole account/playlist finishes.
+        opts["progress_hooks"] = [_make_progress_hook(on_item_done)]
     if extra_opts:
         opts.update(extra_opts)
 

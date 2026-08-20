@@ -8,23 +8,14 @@ import sys
 import zlib
 
 from . import accounts as accounts_mod
-from . import auth, config, expand, fetch, llm, prune, storage
+from . import auth, config, download as download_cmd, expand, fetch, llm, prune, storage
 from . import brain as brain_mod
 from . import larp as larp_mod
 from . import profile as profile_mod
 from . import curate as curate_mod
 from . import select as select_mod
-from .downloaders import instagram, tiktok, youtube
-from .downloaders import urls as urls_mod
 
 logger = logging.getLogger("yunoballizer")
-
-
-def _non_negative_int(value: str) -> int:
-    number = int(value)
-    if number < 0:
-        raise argparse.ArgumentTypeError("must be 0 or greater")
-    return number
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,20 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    download_parser = sub.add_parser("download", help="No login required. Anonymous harvesting of accounts + urls.txt")
-    download_parser.add_argument(
-        "-l", "--limit", type=int, default=20,
-        help="Max posts to harvest per account (default: 20)",
-    )
-    download_parser.add_argument(
-        "-s", "--skip", type=_non_negative_int, default=0,
-        help="Skip the newest N posts per account before harvesting (default: 0)",
-    )
-    download_parser.add_argument(
-        "target", nargs="?", default=None,
-        help="Harvest a single target across instagram/youtube/tiktok instead of the configured lists. "
-             "Must start with '@' for an account, e.g. '@nasa' (hashtag support may come later)",
-    )
+    download_cmd.add_subparser(sub)
 
     fetch_parser = sub.add_parser(
         "fetch",
@@ -246,20 +224,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_download(
-    limit: int = 20,
-    skip: int = 0,
-    accounts: list[str] | None = None,
-) -> None:
-    instagram.harvest(limit=limit, skip=skip, accounts=accounts)
-    youtube.harvest(limit=limit, skip=skip, accounts=accounts)
-    tiktok.harvest(limit=limit, skip=skip, accounts=accounts)
-    if accounts is None:
-        urls_mod.harvest()
-    added = storage.refresh_review()
-    logger.info("New items added to review/: %d", added)
-
-
 def _run_expand() -> None:
     added_caption = expand.scan_caption_mentions()
     logger.info("New Instagram accounts added from caption mentions: %d", added_caption)
@@ -360,12 +324,7 @@ def main(argv: list[str] | None = None) -> None:
             removed = accounts_mod.remove(args.platform, args.username)
             print(f"{'Removed' if removed else 'Not found:'} @{username} ({args.platform})")
     elif args.command == "download":
-        accounts = None
-        if args.target:
-            if not args.target.startswith("@"):
-                raise SystemExit(f"Invalid target '{args.target}': accounts must start with '@' (e.g. '@nasa')")
-            accounts = [args.target[1:]]
-        _run_download(limit=args.limit, skip=args.skip, accounts=accounts)
+        download_cmd.run(args)
     elif args.command == "profile":
         profile_mod.build()
     elif args.command == "curate":
@@ -396,7 +355,7 @@ def main(argv: list[str] | None = None) -> None:
             brain_mod.remove_profile(args.name)
             print(f"Removed brain profile {args.name!r}.")
     elif args.command == "all":
-        _run_download()
+        download_cmd._run_download()
         if (config.DERIVED_DIR / profile_mod.PROFILE_FILENAME).exists():
             curate_mod.run()
 

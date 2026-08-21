@@ -102,7 +102,7 @@ def _run_download(
     media_type: str | None = None,
     total_limit: int | None = None,
     delay: int | None = None,
-) -> None:
+) -> int:
     selected = set(platforms) if platforms else set(PLATFORMS)
     budget = TotalBudget(total_limit) if total_limit is not None else None
     # Each harvest() below refreshes review/ incrementally as it goes (per
@@ -133,9 +133,10 @@ def _run_download(
     if accounts is None and platforms is None:
         urls_mod.harvest(progress=progress, budget=budget)
     logger.info("New items added to review/: %d", progress.total)
+    return progress.total
 
 
-def _run_target_url(url: str) -> None:
+def _run_target_url(url: str) -> int:
     """Download a single ad-hoc post/video URL passed directly as `yuno download`'s target.
 
     Uses the same URL router as configured URLs: Instagram links go through
@@ -144,15 +145,15 @@ def _run_target_url(url: str) -> None:
     progress = storage.ReviewProgress()
     urls_mod.download_urls([url], progress=progress)
     logger.info("New items added to review/: %d", progress.total)
+    return progress.total
 
 
-def run(args: argparse.Namespace) -> None:
+def run(args: argparse.Namespace) -> int:
     if args.since is not None and args.until is not None and args.since > args.until:
         raise SystemExit(f"--since ({args.since}) is after --until ({args.until})")
 
     if args.target and _is_url(args.target):
-        _run_target_url(args.target)
-        return
+        return _run_target_url(args.target)
 
     accounts = None
     if args.target:
@@ -163,7 +164,7 @@ def run(args: argparse.Namespace) -> None:
             )
         accounts = [args.target[1:]]
 
-    _run_download(
+    return _run_download(
         limit=args.limit,
         skip=args.skip,
         accounts=accounts,

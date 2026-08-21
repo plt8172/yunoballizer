@@ -10,7 +10,7 @@ import zlib
 from . import config, llm, storage
 from .commands import accounts as accounts_mod
 from .commands import urls as urls_mod
-from .commands import auth, discover, download as download_cmd, fetch, prune
+from .commands import auth, discover, download as download_cmd, fetch, prune, schedule
 from .commands import brain as brain_mod
 from .commands import larp as larp_mod
 from .commands import select as select_mod
@@ -149,6 +149,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum new posts to judge in --auto mode (default: 20)",
     )
     sub.add_parser("export", help="Copy/hardlink selected media into selected/")
+
+    schedule.add_subparser(sub)
 
     brain_parser = sub.add_parser(
         "brain", help="Configure named AI provider profiles used by select, discover, and larp"
@@ -369,6 +371,18 @@ def main(argv: list[str] | None = None) -> None:
             select_mod.run_select()
     elif args.command == "export":
         select_mod.run_export()
+    elif args.command == "schedule":
+        schedule_command = getattr(args, "schedule_command", None)
+        if schedule_command == "set":
+            schedule.configure(args)
+        elif schedule_command == "run":
+            schedule.start(args)
+        elif schedule_command == "pause":
+            schedule.pause(args)
+        elif schedule_command == "status":
+            schedule.status(args)
+        else:
+            schedule.run(args)
     elif args.command == "larp":
         _run_larp(args)
     elif args.command == "brain":

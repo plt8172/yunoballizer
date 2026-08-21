@@ -200,6 +200,38 @@ mention count and similar-account evidence. The default is preview-only.
 > selected individually before they are added. Currently preview mode only
 > prints the ranked list.
 
+### Scheduling
+
+```bash
+yuno schedule                    # one pass: discover --add -> download -> select --auto
+yuno schedule --discover-limit 5 --download-limit 10 --select-limit 10
+
+yuno schedule set --interval 12  # configure the launchd job (doesn't start it)
+yuno schedule run                # start it (`launchctl load`)
+yuno schedule status             # is it loaded/running? runs + items downloaded so far
+yuno schedule pause              # stop it (`launchctl unload`), config stays put
+```
+
+Bare `yuno schedule` runs one pass of the chain, in this order: `discover
+--add` (so newly-found accounts are seeded), then `download` (so they get
+harvested in the same run), then `select --auto` (so freshly downloaded
+items get judged). discover needs at least one selected post to seed from,
+and `select --auto` needs a configured brain profile (`yuno brain config`)
+-- on a fresh setup, either step is skipped with a logged warning instead
+of aborting the rest of the chain.
+
+`set`/`run`/`pause`/`status` manage a `launchd` job that calls the chain
+above repeatedly, and are **macOS-only**:
+
+- `set` writes `~/Library/LaunchAgents/com.yunoballizer.schedule.plist`
+  (previewing the interval + chain order first) without starting it.
+- `run` starts it and resets the run/download counters; `pause` stops it
+  without deleting the config. Both prompt for confirmation (skip with `-y`).
+- `status` reports whether launchd currently has the job loaded/running
+  and the run count + items downloaded since the last `run`.
+
+Logs land in `~/.local/state/yunoballizer/launchd.{out,err}.log`.
+
 ### Brain profiles
 
 ```bash

@@ -63,8 +63,7 @@ SELECTED_DIR = DATA_DIR / "selected"
 ARCHIVE_DIR = STATE_DIR / "archives"
 SELECTED_PATH = CONFIG_DIR / "selected.json"
 
-LARP_DIR = CONFIG_DIR / "larp"
-LARP_STYLES_DIR = LARP_DIR / "styles"
+LARP_PATH = CONFIG_DIR / "larp.json"
 
 ENV_FILE = CONFIG_DIR / ".env"
 INPUT_KEYS = ("instagram", "youtube", "tiktok", "urls")
@@ -119,21 +118,26 @@ def read_inputs() -> dict[str, list[str]]:
     return inputs
 
 
+def write_json_atomic(path: Path, data: object) -> None:
+    """Write data as JSON to path via a temp file + atomic rename, so a crash
+    or concurrent read mid-write can't ever observe a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}-", suffix=".tmp", delete=False
+    ) as handle:
+        temp_path = Path(handle.name)
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+    temp_path.replace(path)
+
+
 def write_inputs(inputs: dict[str, list[str]]) -> None:
     """Atomically write all unified download inputs."""
     normalized = {
         key: _normalize_input_values(key, list(inputs.get(key, [])))
         for key in INPUT_KEYS
     }
-    path = inputs_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, prefix=".inputs-", suffix=".tmp", delete=False
-    ) as handle:
-        temp_path = Path(handle.name)
-        json.dump(normalized, handle, ensure_ascii=False, indent=2)
-        handle.write("\n")
-    temp_path.replace(path)
+    write_json_atomic(inputs_path(), normalized)
 
 
 def input_values(key: str) -> list[str]:
@@ -173,7 +177,7 @@ def ensure_config() -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     for directory in (
         DOWNLOADED_DIR, REVIEW_DIR, SELECTED_DIR,
-        ARCHIVE_DIR, LARP_STYLES_DIR,
+        ARCHIVE_DIR,
     ):
         directory.mkdir(parents=True, exist_ok=True)
 

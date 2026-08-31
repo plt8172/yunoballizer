@@ -76,7 +76,6 @@ class EnsureConfigTests(unittest.TestCase):
                 patch.object(config, "REVIEW_DIR", data_dir / "review"),
                 patch.object(config, "SELECTED_DIR", data_dir / "selected"),
                 patch.object(config, "ARCHIVE_DIR", state_dir / "archives"),
-                patch.object(config, "LARP_STYLES_DIR", config_dir / "larp" / "styles"),
             ):
                 config.ensure_config()
 
@@ -84,7 +83,6 @@ class EnsureConfigTests(unittest.TestCase):
             self.assertTrue((data_dir / "review").is_dir())
             self.assertTrue((data_dir / "selected").is_dir())
             self.assertTrue((state_dir / "archives").is_dir())
-            self.assertTrue((config_dir / "larp" / "styles").is_dir())
             inputs = json.loads((config_dir / "inputs.json").read_text(encoding="utf-8"))
             self.assertEqual(
                 inputs,

@@ -11,9 +11,9 @@ from yunoballizer.commands import larp
 class StyleStorageTests(unittest.TestCase):
     def test_add_read_remove_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
 
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 self.assertEqual(larp.read_templates("casual"), [])
                 self.assertEqual(larp.list_styles(), [])
 
@@ -30,8 +30,8 @@ class StyleStorageTests(unittest.TestCase):
 
     def test_removing_last_template_drops_the_style(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "only one")
                 larp.remove_template("casual", 0)
                 self.assertEqual(larp.list_styles(), [])
@@ -39,8 +39,8 @@ class StyleStorageTests(unittest.TestCase):
 
     def test_styles_are_kept_separate(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "casual one")
                 larp.add_template("formal", "formal one")
 
@@ -48,41 +48,43 @@ class StyleStorageTests(unittest.TestCase):
                 self.assertEqual(larp.read_templates("casual"), ["casual one"])
                 self.assertEqual(larp.read_templates("formal"), ["formal one"])
 
-    def test_read_templates_ignores_comments(self) -> None:
+    def test_template_with_internal_blank_lines_round_trips_as_one_entry(self) -> None:
+        # Regression test: a caption that itself contains blank lines (e.g. a
+        # multi-paragraph Instagram caption) used to get shredded into
+        # multiple templates because the old .txt storage used a blank line
+        # as the block separator. JSON storage keeps each template as one
+        # discrete string, so internal blank lines are just characters.
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            styles_dir.mkdir(parents=True)
-            (styles_dir / "casual.txt").write_text(
-                "# a comment\n"
-                "hello world\n"
-                "\n"
-                "# another comment\n"
-                "second one\n",
-                encoding="utf-8",
-            )
+            larp_path = Path(tmpdir) / "larp.json"
+            multi_paragraph = "first paragraph\n\nsecond paragraph\n\nthird paragraph"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
+                larp.add_template("casual", multi_paragraph)
+                larp.add_template("casual", "a second, unrelated template")
 
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
-                self.assertEqual(larp.read_templates("casual"), ["hello world", "second one"])
+                self.assertEqual(
+                    larp.read_templates("casual"),
+                    [multi_paragraph, "a second, unrelated template"],
+                )
 
     def test_remove_template_out_of_range_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "only one")
                 with self.assertRaises(IndexError):
                     larp.remove_template("casual", 5)
 
     def test_add_template_rejects_invalid_style_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 with self.assertRaises(ValueError):
                     larp.add_template("../escape", "text")
 
     def test_rename_style(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "hello")
                 larp.rename_style("casual", "chatty")
                 self.assertEqual(larp.list_styles(), ["chatty"])
@@ -90,15 +92,15 @@ class StyleStorageTests(unittest.TestCase):
 
     def test_rename_style_missing_source_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 with self.assertRaises(SystemExit):
                     larp.rename_style("missing", "new")
 
     def test_rename_style_existing_destination_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "hello")
                 larp.add_template("formal", "hi")
                 with self.assertRaises(SystemExit):
@@ -106,16 +108,16 @@ class StyleStorageTests(unittest.TestCase):
 
     def test_delete_style(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "hello")
                 larp.delete_style("casual")
                 self.assertEqual(larp.list_styles(), [])
 
     def test_delete_missing_style_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 with self.assertRaises(SystemExit):
                     larp.delete_style("missing")
 
@@ -123,9 +125,9 @@ class StyleStorageTests(unittest.TestCase):
 class CorpusTests(unittest.TestCase):
     def test_build_corpus_returns_the_given_styles_templates(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
 
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "saved template text")
                 corpus = larp.build_corpus(style="casual")
 
@@ -133,9 +135,9 @@ class CorpusTests(unittest.TestCase):
 
     def test_build_corpus_auto_uses_the_only_style(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
 
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "only style template")
                 corpus = larp.build_corpus()
 
@@ -143,16 +145,16 @@ class CorpusTests(unittest.TestCase):
 
     def test_build_corpus_with_no_styles_returns_empty(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
 
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 self.assertEqual(larp.build_corpus(), [])
 
     def test_build_corpus_requires_style_when_multiple_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
 
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "one")
                 larp.add_template("formal", "two")
                 with self.assertRaises(SystemExit):
@@ -160,9 +162,9 @@ class CorpusTests(unittest.TestCase):
 
     def test_build_corpus_unknown_style_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
 
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "one")
                 with self.assertRaises(SystemExit):
                     larp.build_corpus(style="nope")
@@ -201,20 +203,20 @@ class GenerateTests(unittest.TestCase):
 
     def test_generate_without_corpus_raises_system_exit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
                 patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
             ):
                 with self.assertRaises(SystemExit):
                     larp.generate()
 
     def test_generate_uses_corpus_and_calls_llm_count_times(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
                 patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(larp.llm, "call", return_value="generated") as mock_call,
             ):
                 larp.add_template("casual", "example one")
@@ -227,11 +229,11 @@ class GenerateTests(unittest.TestCase):
 
     def test_generate_passes_api_base_through_to_llm_call(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             custom_base = "https://openrouter.ai/api/v1/chat/completions"
             with (
                 patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(larp.llm, "call", return_value="generated") as mock_call,
             ):
                 larp.add_template("casual", "example one")
@@ -241,10 +243,10 @@ class GenerateTests(unittest.TestCase):
 
     def test_generate_defaults_max_tokens_to_llm_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
                 patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(larp.llm, "call", return_value="generated") as mock_call,
             ):
                 larp.add_template("casual", "example one")
@@ -254,10 +256,10 @@ class GenerateTests(unittest.TestCase):
 
     def test_generate_passes_max_tokens_through_to_llm_call(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
                 patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(larp.llm, "call", return_value="generated") as mock_call,
             ):
                 larp.add_template("casual", "example one")
@@ -267,10 +269,10 @@ class GenerateTests(unittest.TestCase):
 
     def test_generate_passes_language_into_the_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
                 patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(larp.llm, "call", return_value="generated") as mock_call,
             ):
                 larp.add_template("casual", "example one")
@@ -281,10 +283,10 @@ class GenerateTests(unittest.TestCase):
 
     def test_generate_caps_few_shot_examples(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
                 patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(larp.llm, "call", return_value="generated") as mock_call,
             ):
                 for i in range(10):
@@ -299,10 +301,10 @@ class GenerateTests(unittest.TestCase):
 
     def test_generate_requires_style_when_multiple_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
                 patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
             ):
                 larp.add_template("casual", "one")
                 larp.add_template("formal", "two")
@@ -311,10 +313,10 @@ class GenerateTests(unittest.TestCase):
 
     def test_generate_converts_llm_error_to_system_exit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
                 patch.dict("os.environ", {larp.llm.API_KEY_ENV: "test-key"}),
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(larp.llm, "call", side_effect=larp.llm.LlmError("boom")),
             ):
                 larp.add_template("casual", "one")
@@ -326,16 +328,16 @@ class GenerateTests(unittest.TestCase):
 class BrowseTests(unittest.TestCase):
     def test_no_saved_templates_raises_system_exit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 with self.assertRaises(SystemExit):
                     larp.browse("casual")
 
     def test_quits_immediately_on_q(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(larp.termui, "read_key", side_effect=["q"]),
             ):
                 larp.add_template("casual", "one")
@@ -343,9 +345,9 @@ class BrowseTests(unittest.TestCase):
 
     def test_right_advances_and_clamps_at_the_end(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(
                     larp.termui, "read_key", side_effect=["right", "right", "right", "q"]
                 ) as mock_read_key,
@@ -358,9 +360,9 @@ class BrowseTests(unittest.TestCase):
 
     def test_left_goes_back_and_clamps_at_the_start(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(larp.termui, "read_key", side_effect=["left", "left", "q"]),
             ):
                 larp.add_template("casual", "one")
@@ -369,8 +371,8 @@ class BrowseTests(unittest.TestCase):
 
     def test_enter_and_ctrl_c_and_esc_all_quit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
-            with patch.object(larp.config, "LARP_STYLES_DIR", styles_dir):
+            larp_path = Path(tmpdir) / "larp.json"
+            with patch.object(larp.config, "LARP_PATH", larp_path):
                 larp.add_template("casual", "one")
                 for quit_key in ("\r", "\n", "\x03", "esc"):
                     with patch.object(larp.termui, "read_key", side_effect=[quit_key]):
@@ -379,9 +381,9 @@ class BrowseTests(unittest.TestCase):
     @patch("builtins.print")
     def test_renders_the_current_template_text(self, mock_print) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            styles_dir = Path(tmpdir) / "larp" / "styles"
+            larp_path = Path(tmpdir) / "larp.json"
             with (
-                patch.object(larp.config, "LARP_STYLES_DIR", styles_dir),
+                patch.object(larp.config, "LARP_PATH", larp_path),
                 patch.object(larp.termui, "read_key", side_effect=["right", "q"]),
             ):
                 larp.add_template("casual", "first template")

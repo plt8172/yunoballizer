@@ -1,17 +1,19 @@
 """Generates comment/caption text via a shared LLM client (see llm.py),
-trained on per-style saved templates under $CONFIG_DIR/larp/styles/ (one
-file per style/alias).
+trained on per-style saved templates kept in $CONFIG_DIR/larp.json (one
+JSON list of template strings per style/alias).
 
-Templates get there two ways: `yuno larp add/list/remove/rename/delete`
-(or editing a style's file directly), and `yuno select`'s 'c' key, which
-files the item you're currently looking at -- its own downloaded caption
--- into a style you pick while browsing. A fully separate action from
-picking favorites with 's' (see select.py), just another way of writing
-into the same template files.
+Templates get there two ways: `yuno larp add/list/remove/rename/delete`,
+and `yuno select`'s 'c' key, which files the item you're currently looking
+at -- its own downloaded caption -- into a style you pick while browsing.
+A fully separate action from picking favorites with 's' (see select.py),
+just another way of writing into the same JSON.
 
-Styles are kept in separate files rather than one shared pool so that
+Styles are kept as separate lists rather than one shared pool so that
 different voices/formats (e.g. a chatty travel-caption style vs a terse
 one-liner style) don't blend into an incoherent average when generating.
+Each template is stored as its own JSON string, so a caption that itself
+spans multiple paragraphs (blank lines and all) round-trips intact instead
+of being mistaken for several separate templates.
 
 Generation itself is a few-shot text generator: a style's saved templates
 go in as examples, and the model is asked for one new example in the same
@@ -25,8 +27,8 @@ signal.
 """
 from __future__ import annotations
 
+import json
 import re
-from pathlib import Path
 
 from .. import config, llm, termui
 
@@ -44,93 +46,85 @@ def _validate_style_name(style: str) -> str:
     return style
 
 
-def _style_path(style: str) -> Path:
-    return config.LARP_STYLES_DIR / f"{_validate_style_name(style)}.txt"
+def _load_styles() -> dict[str, list[str]]:
+    if not config.LARP_PATH.exists():
+        return {}
+    try:
+        raw = json.loads(config.LARP_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Could not read {config.LARP_PATH}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise SystemExit(f"Invalid {config.LARP_PATH}: expected a JSON object.")
+    return raw
+
+
+def _save_styles(styles: dict[str, list[str]]) -> None:
+    config.write_json_atomic(config.LARP_PATH, styles)
 
 
 def list_styles() -> list[str]:
-    """Return known style names (aliases), sorted, one per templates file under larp/styles/."""
-    if not config.LARP_STYLES_DIR.exists():
-        return []
-    return sorted(p.stem for p in config.LARP_STYLES_DIR.glob("*.txt"))
+    """Return known style names (aliases), sorted."""
+    return sorted(_load_styles())
 
 
 def read_templates(style: str) -> list[str]:
-    """Parse blank-line-separated template blocks from a style's file, skipping comment lines."""
-    path = _style_path(style)
-    if not path.exists():
-        return []
-
-    blocks: list[str] = []
-    current: list[str] = []
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if line.startswith("#"):
-            continue
-        if not line:
-            if current:
-                blocks.append("\n".join(current))
-                current = []
-            continue
-        current.append(raw_line)
-    if current:
-        blocks.append("\n".join(current))
-    return blocks
+    """Return a style's saved templates, or [] if the style doesn't exist."""
+    return list(_load_styles().get(_validate_style_name(style), []))
 
 
 def add_template(style: str, text: str) -> None:
-    """Append a new template block to a style's file, creating the style if needed."""
+    """Append a new template to a style's list, creating the style if needed."""
+    style = _validate_style_name(style)
     text = text.strip()
     if not text:
         raise ValueError("Template text must not be empty")
 
-    path = _style_path(style)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    with path.open("a", encoding="utf-8") as f:
-        if existing.strip():
-            if not existing.endswith("\n"):
-                f.write("\n")
-            f.write("\n")
-        f.write(text + "\n")
+    styles = _load_styles()
+    styles.setdefault(style, []).append(text)
+    _save_styles(styles)
 
 
 def remove_template(style: str, index: int) -> str:
     """Remove and return the template at `index` within a style (see `read_templates`/`yuno larp list <style>`).
 
-    Deletes the style's file (dropping the alias) once its last template is removed.
+    Drops the style (its alias) once its last template is removed.
     """
-    templates = read_templates(style)
+    style = _validate_style_name(style)
+    styles = _load_styles()
+    templates = styles.get(style, [])
     if index < 0 or index >= len(templates):
         raise IndexError(f"No template at index {index} in style {style!r}")
     removed = templates.pop(index)
 
-    path = _style_path(style)
     if templates:
-        path.write_text("\n\n".join(templates) + "\n", encoding="utf-8")
+        styles[style] = templates
     else:
-        path.unlink(missing_ok=True)
+        styles.pop(style, None)
+    _save_styles(styles)
     return removed
 
 
 def rename_style(old: str, new: str) -> None:
-    """Rename a style's alias by renaming its underlying templates file."""
-    old_path = _style_path(old)
-    new_path = _style_path(new)
-    if not old_path.exists():
+    """Rename a style's alias."""
+    old = _validate_style_name(old)
+    new = _validate_style_name(new)
+    styles = _load_styles()
+    if old not in styles:
         raise SystemExit(f"No such style: {old!r}")
-    if new_path.exists():
+    if new in styles:
         raise SystemExit(f"Style {new!r} already exists")
-    new_path.parent.mkdir(parents=True, exist_ok=True)
-    old_path.rename(new_path)
+    styles[new] = styles.pop(old)
+    _save_styles(styles)
 
 
 def delete_style(style: str) -> None:
     """Delete a style and all of its saved templates."""
-    path = _style_path(style)
-    if not path.exists():
+    style = _validate_style_name(style)
+    styles = _load_styles()
+    if style not in styles:
         raise SystemExit(f"No such style: {style!r}")
-    path.unlink()
+    del styles[style]
+    _save_styles(styles)
 
 
 def _render_browse_item(style: str, templates: list[str], index: int) -> None:
@@ -224,7 +218,7 @@ def generate(
         raise SystemExit(
             "No larp templates found.\n"
             'Add one with `yuno larp add <style> "..."`, the \'c\' key in `yuno select`, '
-            f"or edit a file under {config.LARP_STYLES_DIR} directly."
+            f"or edit {config.LARP_PATH} directly."
         )
 
     prompt = _build_prompt(corpus[:max_examples], language=language)

@@ -4,7 +4,6 @@ Follows the XDG Base Directory conventions:
 
 - Data:   $YUNOBALLIZER_DATA_DIR, else $XDG_DATA_HOME/yunoballizer, else ~/.local/share/yunoballizer
 - Config: $XDG_CONFIG_HOME/yunoballizer, else ~/.config/yunoballizer
-- State:  $XDG_STATE_HOME/yunoballizer, else ~/.local/state/yunoballizer
 
 A relative path in any of these environment variables is rejected outright
 (rather than silently falling back) so a typo doesn't quietly redirect where
@@ -45,22 +44,13 @@ def _config_root() -> Path:
     return Path.home() / ".config" / "yunoballizer"
 
 
-def _state_root() -> Path:
-    xdg_state_home = _env_path("XDG_STATE_HOME")
-    if xdg_state_home is not None:
-        return xdg_state_home / "yunoballizer"
-    return Path.home() / ".local" / "state" / "yunoballizer"
-
-
 DATA_DIR = _data_root()
 CONFIG_DIR = _config_root()
-STATE_DIR = _state_root()
 
 DOWNLOADED_DIR = DATA_DIR / "downloaded"
 REVIEW_DIR = DATA_DIR / "review"
 SELECTED_DIR = DATA_DIR / "selected"
 
-ARCHIVE_DIR = STATE_DIR / "archives"
 SELECTED_PATH = CONFIG_DIR / "selected.json"
 
 LARP_PATH = CONFIG_DIR / "larp.json"
@@ -173,11 +163,10 @@ def remove_input(key: str, value: str) -> bool:
 
 
 def ensure_config() -> None:
-    """Create config/data/state directories and the unified input file."""
+    """Create config/data directories and the unified input file."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     for directory in (
         DOWNLOADED_DIR, REVIEW_DIR, SELECTED_DIR,
-        ARCHIVE_DIR,
     ):
         directory.mkdir(parents=True, exist_ok=True)
 

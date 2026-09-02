@@ -32,7 +32,6 @@ def _make_progress_hook(on_item_done: Callable[[Path], None]) -> Callable[[dict]
 def download(
     urls: str | Iterable[str],
     out_template: str,
-    archive: Path,
     extra_opts: dict | None = None,
     metadata_template: str | None = None,
     caption_template: str | None = None,
@@ -50,8 +49,11 @@ def download(
             output_templates["description"] = caption_template
 
     opts = {
-        "download_archive": str(archive),
         "writeinfojson": True,
+        # Downloaded media is the source of truth across every platform. Let
+        # yt-dlp skip an existing output file, but redownload it if that file
+        # is removed, instead of keeping a separate permanent ID archive.
+        "overwrites": False,
         "allow_playlist_files": False,
         "outtmpl": output_templates,
         "ignoreerrors": True,
@@ -70,6 +72,5 @@ def download(
     if extra_opts:
         opts.update(extra_opts)
 
-    archive.parent.mkdir(parents=True, exist_ok=True)
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download(list(urls))

@@ -28,6 +28,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .. import config as app_config
 from . import discover
 from . import download as download_cmd
 from . import select as select_mod
@@ -35,10 +36,12 @@ from . import select as select_mod
 logger = logging.getLogger(__name__)
 
 LABEL = "com.yunoballizer.schedule"
-STATE_DIR = Path.home() / ".local" / "state" / "yunoballizer"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
-CONFIG_PATH = STATE_DIR / "schedule_config.json"
-STATS_PATH = STATE_DIR / "schedule_stats.json"
+SCHEDULE_DATA_DIR = app_config.DATA_DIR / "schedule"
+CONFIG_PATH = app_config.CONFIG_DIR / "schedule.json"
+STATS_PATH = SCHEDULE_DATA_DIR / "stats.json"
+STDOUT_PATH = SCHEDULE_DATA_DIR / "launchd.out.log"
+STDERR_PATH = SCHEDULE_DATA_DIR / "launchd.err.log"
 
 
 def add_subparser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -148,7 +151,7 @@ def _record_run(downloaded: int) -> None:
     stats["downloaded"] = stats.get("downloaded", 0) + downloaded
     stats.setdefault("started_at", _now())
     stats["last_run_at"] = _now()
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATS_PATH.write_text(json.dumps(stats, indent=2))
 
 
@@ -186,9 +189,9 @@ def _plist_xml(*, yuno_path: str, interval_seconds: int, program_args: list[str]
     <false/>
 
     <key>StandardOutPath</key>
-    <string>{STATE_DIR}/launchd.out.log</string>
+    <string>{STDOUT_PATH}</string>
     <key>StandardErrorPath</key>
-    <string>{STATE_DIR}/launchd.err.log</string>
+    <string>{STDERR_PATH}</string>
 </dict>
 </plist>
 """
@@ -229,7 +232,8 @@ def configure(args: argparse.Namespace) -> None:
             print("Aborted.")
             return
 
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SCHEDULE_DATA_DIR.mkdir(parents=True, exist_ok=True)
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
     PLIST_PATH.write_text(plist)
     CONFIG_PATH.write_text(json.dumps({
@@ -252,8 +256,8 @@ def start(args: argparse.Namespace) -> None:
         print(f"{LABEL} is already running.")
         return
 
-    config = _read_json(CONFIG_PATH, {})
-    print(f"Starting {LABEL} (every {config.get('interval_hours', '?')}h) from {PLIST_PATH}")
+    settings = _read_json(CONFIG_PATH, {})
+    print(f"Starting {LABEL} (every {settings.get('interval_hours', '?')}h) from {PLIST_PATH}")
     if not args.yes:
         answer = input("Load it now? [y/N] ").strip().lower()
         if answer not in ("y", "yes"):
@@ -261,11 +265,11 @@ def start(args: argparse.Namespace) -> None:
             return
 
     subprocess.run(["launchctl", "load", str(PLIST_PATH)], check=True)
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATS_PATH.write_text(json.dumps({
         "runs": 0, "downloaded": 0, "started_at": _now(), "last_run_at": None,
     }, indent=2))
-    print(f"Started. Logs: {STATE_DIR}/launchd.{{out,err}}.log")
+    print(f"Started. Logs: {SCHEDULE_DATA_DIR}/launchd.{{out,err}}.log")
 
 
 def pause(args: argparse.Namespace) -> None:
@@ -288,8 +292,8 @@ def status(args: argparse.Namespace) -> None:
         print("Not configured. Run `yuno schedule set` first.")
         return
 
-    config = _read_json(CONFIG_PATH, {})
-    print(f"Configured: every {config.get('interval_hours', '?')}h -> {PLIST_PATH}")
+    settings = _read_json(CONFIG_PATH, {})
+    print(f"Configured: every {settings.get('interval_hours', '?')}h -> {PLIST_PATH}")
 
     if sys.platform == "darwin":
         launchctl = _launchctl_status(LABEL)

@@ -230,7 +230,7 @@ above repeatedly, and are **macOS-only**:
 - `status` reports whether launchd currently has the job loaded/running
   and the run count + items downloaded since the last `run`.
 
-Logs land in `~/.local/state/yunoballizer/launchd.{out,err}.log`.
+Logs land in `~/.local/share/yunoballizer/schedule/launchd.{out,err}.log`.
 
 ### Brain profiles
 
@@ -286,7 +286,6 @@ its selection state. `--style` may be omitted when only one style exists.
 |---|---|
 | Data | `$YUNOBALLIZER_DATA_DIR`, `$XDG_DATA_HOME/yunoballizer`, `~/.local/share/yunoballizer` |
 | Config | `$XDG_CONFIG_HOME/yunoballizer`, `~/.config/yunoballizer` |
-| State | `$XDG_STATE_HOME/yunoballizer`, `~/.local/state/yunoballizer` |
 
 Paths supplied through these variables must be absolute.
 
@@ -298,14 +297,13 @@ Paths supplied through these variables must be absolute.
 │   ├── tiktok/<account>/<post-id>/
 │   └── other/<extractor>/<uploader>/<post-id>/
 ├── review/               # symlink index into downloaded/
-└── selected/             # exported real files
-
-~/.local/state/yunoballizer/
-└── archives/             # yt-dlp deduplication state
+├── selected/             # exported real files
+└── schedule/             # launchd logs and run statistics
 
 ~/.config/yunoballizer/
 ├── inputs.json           # Instagram/YouTube/TikTok IDs + URLs
 ├── selected.json         # manual/automatic selections
+├── schedule.json         # launchd schedule settings
 ├── sessions/
 │   ├── active
 │   └── <username>.session
@@ -323,7 +321,7 @@ affecting downloaded files.
 ## Uninstalling
 
 ```bash
-yuno prune                # Remove this app's config, data, and state
+yuno prune                # Remove this app's config and data
 pip uninstall yunoballizer
 ```
 

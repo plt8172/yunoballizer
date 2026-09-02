@@ -8,8 +8,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from yunoballizer import config
+from yunoballizer.commands import schedule
 
-_RELEVANT_ENV_VARS = ("YUNOBALLIZER_DATA_DIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME")
+_RELEVANT_ENV_VARS = ("YUNOBALLIZER_DATA_DIR", "XDG_DATA_HOME", "XDG_CONFIG_HOME")
 
 
 def _env(**overrides: str) -> dict[str, str]:
@@ -37,19 +38,11 @@ class XdgPathTests(unittest.TestCase):
         with patch.dict("os.environ", _env()):
             self.assertEqual(config._config_root(), Path.home() / ".config" / "yunoballizer")
 
-    def test_state_root_prefers_xdg_over_default(self) -> None:
-        with patch.dict("os.environ", _env(XDG_STATE_HOME="/xdg-state")):
-            self.assertEqual(config._state_root(), Path("/xdg-state") / "yunoballizer")
-
-        with patch.dict("os.environ", _env()):
-            self.assertEqual(config._state_root(), Path.home() / ".local" / "state" / "yunoballizer")
-
     def test_relative_paths_are_rejected_for_every_recognized_env_var(self) -> None:
         for name, resolver in (
             ("YUNOBALLIZER_DATA_DIR", config._data_root),
             ("XDG_DATA_HOME", config._data_root),
             ("XDG_CONFIG_HOME", config._config_root),
-            ("XDG_STATE_HOME", config._state_root),
         ):
             with patch.dict("os.environ", _env(**{name: "relative/path"})):
                 with self.assertRaises(SystemExit):
@@ -66,28 +59,33 @@ class EnsureConfigTests(unittest.TestCase):
             root = Path(tmpdir)
             data_dir = root / "data"
             config_dir = root / "config"
-            state_dir = root / "state"
-
             with (
                 patch.object(config, "DATA_DIR", data_dir),
                 patch.object(config, "CONFIG_DIR", config_dir),
-                patch.object(config, "STATE_DIR", state_dir),
                 patch.object(config, "DOWNLOADED_DIR", data_dir / "downloaded"),
                 patch.object(config, "REVIEW_DIR", data_dir / "review"),
                 patch.object(config, "SELECTED_DIR", data_dir / "selected"),
-                patch.object(config, "ARCHIVE_DIR", state_dir / "archives"),
             ):
                 config.ensure_config()
 
             self.assertTrue((data_dir / "downloaded").is_dir())
             self.assertTrue((data_dir / "review").is_dir())
             self.assertTrue((data_dir / "selected").is_dir())
-            self.assertTrue((state_dir / "archives").is_dir())
             inputs = json.loads((config_dir / "inputs.json").read_text(encoding="utf-8"))
             self.assertEqual(
                 inputs,
                 {"instagram": [], "youtube": [], "tiktok": [], "urls": []},
             )
+
+    def test_schedule_uses_config_and_data_directories(self) -> None:
+        self.assertEqual(schedule.CONFIG_PATH, config.CONFIG_DIR / "schedule.json")
+        self.assertEqual(schedule.STATS_PATH, config.DATA_DIR / "schedule" / "stats.json")
+        self.assertEqual(
+            schedule.STDOUT_PATH, config.DATA_DIR / "schedule" / "launchd.out.log"
+        )
+        self.assertEqual(
+            schedule.STDERR_PATH, config.DATA_DIR / "schedule" / "launchd.err.log"
+        )
 
 
 class LoadEnvFileTests(unittest.TestCase):

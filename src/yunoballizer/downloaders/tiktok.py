@@ -38,7 +38,6 @@ def harvest(
             return
 
     out_dir = config.DOWNLOADED_DIR / "tiktok"
-    archive = config.ARCHIVE_DIR / "tiktok.txt"
 
     date_opts = {}
     if since is not None or until is not None:
@@ -60,7 +59,6 @@ def harvest(
         download(
             url,
             str(out_dir / account / "%(id)s" / "video.%(ext)s"),
-            archive,
             {"playliststart": skip + 1, "playlistend": skip + account_limit, **date_opts},
             metadata_template=str(out_dir / account / "%(id)s" / "metadata.%(ext)s"),
             caption_template=str(out_dir / account / "%(id)s" / "caption.%(ext)s"),

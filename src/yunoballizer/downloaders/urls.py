@@ -65,9 +65,8 @@ def _download_ytdlp_urls(
 ) -> None:
     """Download a batch of non-Instagram URLs via yt-dlp.
 
-    Shares the configured URL destination, archive file (dedup), and per-item
-    review/ refresh -- also used directly for a single ad-hoc URL passed to
-    `yuno download <url>`.
+    Shares the configured URL destination and per-item review/ refresh -- also
+    used directly for a single ad-hoc URL passed to `yuno download <url>`.
     """
     if not urls:
         return
@@ -90,12 +89,10 @@ def _download_ytdlp_urls(
             )
 
     out_dir = config.DOWNLOADED_DIR / "other"
-    archive = config.ARCHIVE_DIR / "other.txt"
     logger.info("Processing %d URL(s)...", len(urls_to_download))
     download(
         urls_to_download,
         str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "video.%(ext)s"),
-        archive,
         metadata_template=str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "metadata.%(ext)s"),
         caption_template=str(out_dir / "%(extractor)s" / "%(uploader)s" / "%(id)s" / "caption.%(ext)s"),
         on_item_done=functools.partial(storage.refresh_new_ytdlp_post, progress=progress),

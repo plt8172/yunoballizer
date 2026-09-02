@@ -32,7 +32,6 @@ def harvest(
     progress = progress if progress is not None else storage.ReviewProgress()
 
     out_dir = config.DOWNLOADED_DIR / "youtube"
-    archive = config.ARCHIVE_DIR / "youtube.txt"
 
     if accounts is None:
         accounts = config.input_values("youtube")
@@ -59,7 +58,6 @@ def harvest(
         download(
             shorts_url,
             str(out_dir / "%(uploader)s" / "%(id)s" / "video.%(ext)s"),
-            archive,
             {"playliststart": skip + 1, "playlistend": skip + account_limit, **date_opts},
             metadata_template=str(out_dir / "%(uploader)s" / "%(id)s" / "metadata.%(ext)s"),
             caption_template=str(out_dir / "%(uploader)s" / "%(id)s" / "caption.%(ext)s"),

@@ -42,7 +42,6 @@ class YtdlpHelperTests(unittest.TestCase):
             ytdlp_helper.download(
                 "https://example.test/post",
                 str(root / "video.%(ext)s"),
-                root / "state" / "archive.txt",
                 metadata_template=str(root / "metadata.%(ext)s"),
                 caption_template=str(root / "caption.%(ext)s"),
             )
@@ -57,7 +56,9 @@ class YtdlpHelperTests(unittest.TestCase):
             },
         )
         self.assertTrue(options["writedescription"])
+        self.assertFalse(options["overwrites"])
         self.assertFalse(options["allow_playlist_files"])
+        self.assertNotIn("download_archive", options)
         ydl.download.assert_called_once_with(["https://example.test/post"])
 
     def test_on_item_done_fires_once_per_finished_file_with_its_post_dir(self) -> None:
@@ -74,7 +75,6 @@ class YtdlpHelperTests(unittest.TestCase):
             ytdlp_helper.download(
                 "https://example.test/post",
                 str(root / "%(id)s" / "video.%(ext)s"),
-                root / "state" / "archive.txt",
                 on_item_done=on_item_done,
             )
 
@@ -99,7 +99,6 @@ class YtdlpHelperTests(unittest.TestCase):
             ytdlp_helper.download(
                 "https://example.test/post",
                 str(Path(tmpdir) / "video.%(ext)s"),
-                Path(tmpdir) / "state" / "archive.txt",
             )
 
         self.assertNotIn("progress_hooks", youtube_dl.call_args.args[0])
@@ -363,7 +362,9 @@ class InstagramDownloadTests(unittest.TestCase):
                 patch.object(instagram.config, "DOWNLOADED_DIR", downloaded_dir),
                 patch.object(instagram.storage, "organize_instagram_account"),
             ):
-                instagram.harvest(limit=2, skip=1, accounts=["nasa"], sleep_seconds=0)
+                instagram.harvest(
+                    limit=2, skip=1, accounts=["nasa"], sleep_seconds=0, progress=Mock()
+                )
 
             kwargs = loader.download_profiles.call_args.kwargs
             self.assertFalse(kwargs["profile_pic"])
@@ -601,13 +602,12 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(youtube.config, "DOWNLOADED_DIR", Path(tmpdir)),
-            patch.object(youtube.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(youtube, "download") as download,
             patch.object(youtube.storage, "organize_ytdlp_tree") as organize,
         ):
             youtube.harvest(limit=10, skip=5, accounts=["@nasa"])
 
-        self.assertEqual(download.call_args.args[3], {"playliststart": 6, "playlistend": 15})
+        self.assertEqual(download.call_args.args[2], {"playliststart": 6, "playlistend": 15})
         self.assertIn("/%(id)s/video.%(ext)s", download.call_args.args[1])
         self.assertIn("/%(id)s/metadata.%(ext)s", download.call_args.kwargs["metadata_template"])
         self.assertIn("/%(id)s/caption.%(ext)s", download.call_args.kwargs["caption_template"])
@@ -617,14 +617,13 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(tiktok.config, "DOWNLOADED_DIR", Path(tmpdir)),
-            patch.object(tiktok.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(tiktok, "download") as download,
             patch.object(tiktok.storage, "organize_ytdlp_tree") as organize,
             patch.object(tiktok.time, "sleep"),
         ):
             tiktok.harvest(limit=10, skip=5, accounts=["nasa"], sleep_seconds=0)
 
-        self.assertEqual(download.call_args.args[3], {"playliststart": 6, "playlistend": 15})
+        self.assertEqual(download.call_args.args[2], {"playliststart": 6, "playlistend": 15})
         self.assertIn("/%(id)s/video.%(ext)s", download.call_args.args[1])
         self.assertIn("/%(id)s/metadata.%(ext)s", download.call_args.kwargs["metadata_template"])
         self.assertIn("/%(id)s/caption.%(ext)s", download.call_args.kwargs["caption_template"])
@@ -634,7 +633,6 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(youtube.config, "DOWNLOADED_DIR", Path(tmpdir)),
-            patch.object(youtube.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(youtube, "download") as download,
             patch.object(youtube.storage, "organize_ytdlp_tree"),
         ):
@@ -643,7 +641,7 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
                 since=datetime.date(2026, 1, 1), until=datetime.date(2026, 6, 30),
             )
 
-        extra_opts = download.call_args.args[3]
+        extra_opts = download.call_args.args[2]
         daterange = extra_opts["daterange"]
         self.assertEqual(daterange.start, datetime.date(2026, 1, 1))
         self.assertEqual(daterange.end, datetime.date(2026, 6, 30))
@@ -664,7 +662,6 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(youtube.config, "DOWNLOADED_DIR", Path(tmpdir)),
-            patch.object(youtube.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(youtube, "download") as download,
             patch.object(youtube.storage, "organize_ytdlp_tree"),
         ):
@@ -679,7 +676,6 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(tiktok.config, "DOWNLOADED_DIR", Path(tmpdir)),
-            patch.object(tiktok.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(tiktok, "download") as download,
             patch.object(tiktok.storage, "organize_ytdlp_tree"),
             patch.object(tiktok.time, "sleep"),
@@ -696,7 +692,6 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
             patch.object(urls.config, "DOWNLOADED_DIR", Path(tmpdir) / "downloaded"),
-            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(urls, "download") as download,
             patch.object(urls.storage, "organize_ytdlp_tree"),
         ):
@@ -712,7 +707,6 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(tiktok.config, "DOWNLOADED_DIR", Path(tmpdir)),
-            patch.object(tiktok.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(tiktok, "download") as download,
             patch.object(tiktok.storage, "organize_ytdlp_tree"),
             patch.object(tiktok.time, "sleep"),
@@ -721,7 +715,7 @@ class YoutubeTiktokDownloadTests(unittest.TestCase):
             tiktok.harvest(accounts=["a", "b"], limit=20, budget=budget)
 
         download.assert_called_once()
-        self.assertEqual(download.call_args.args[3]["playlistend"], 3)
+        self.assertEqual(download.call_args.args[2]["playlistend"], 3)
         self.assertTrue(budget.exhausted)
 
 
@@ -731,7 +725,6 @@ class UrlsHarvestSplitTests(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
             patch.object(urls.config, "DOWNLOADED_DIR", Path(tmpdir) / "downloaded"),
-            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(urls, "download") as download,
             patch.object(urls.storage, "organize_ytdlp_tree"),
             patch.object(urls, "download_instagram_urls") as download_instagram_urls,
@@ -756,7 +749,6 @@ class UrlsHarvestSplitTests(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
             patch.object(urls.config, "DOWNLOADED_DIR", Path(tmpdir) / "downloaded"),
-            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(urls, "download") as download,
             patch.object(urls, "download_instagram_urls") as download_instagram_urls,
         ):
@@ -775,7 +767,6 @@ class UrlsHarvestSplitTests(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(urls.config, "CONFIG_DIR", Path(tmpdir)),
             patch.object(urls.config, "DOWNLOADED_DIR", Path(tmpdir) / "downloaded"),
-            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(urls, "download") as download,
             patch.object(urls.storage, "organize_ytdlp_tree"),
             patch.object(urls, "download_instagram_urls") as download_instagram_urls,
@@ -798,11 +789,10 @@ class UrlsHarvestSplitTests(unittest.TestCase):
         download.assert_not_called()
         organize.assert_not_called()
 
-    def test_download_urls_shares_the_configured_url_destination_and_archive(self) -> None:
+    def test_download_urls_uses_the_configured_url_destination(self) -> None:
         with (
             tempfile.TemporaryDirectory() as tmpdir,
             patch.object(urls.config, "DOWNLOADED_DIR", Path(tmpdir) / "downloaded"),
-            patch.object(urls.config, "ARCHIVE_DIR", Path(tmpdir) / "archives"),
             patch.object(urls, "download") as download,
             patch.object(urls.storage, "organize_ytdlp_tree") as organize,
         ):
@@ -811,7 +801,7 @@ class UrlsHarvestSplitTests(unittest.TestCase):
 
         download.assert_called_once()
         self.assertEqual(download.call_args.args[0], ["https://www.tiktok.com/@nasa/video/1"])
-        self.assertEqual(download.call_args.args[2], Path(tmpdir) / "archives" / "other.txt")
+        self.assertEqual(len(download.call_args.args), 2)
         on_item_done = download.call_args.kwargs["on_item_done"]
         self.assertEqual(on_item_done.func, urls.storage.refresh_new_ytdlp_post)
         self.assertIs(on_item_done.keywords["progress"], progress)
